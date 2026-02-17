@@ -1,0 +1,37 @@
+# Visual Studio
+bin/
+obj/
+.vs/
+Debug/
+Release/
+x64/
+x86/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+packages/
+
+# Build results
+[Dd]ebug/
+[Rr]elease/
+*.dll
+*.exe
+*.pdb
+*.cache
+
+# NuGet
+*.nupkg
+project.lock.json
+
+# Logs
+Logs/
+*.log
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Config (may contain secrets)
+*.local.config
+appsettings.Development.json
