@@ -62,6 +62,23 @@ namespace App64.Services
             return await _client.RequestAsync(msgType, body, timeoutMs);
         }
 
+        public async Task<string> GetConditionListAsync()
+        {
+            var body = BinarySerializer.SerializeString("LIST");
+            var resp = await _client.RequestAsync(MessageTypes.ConditionRequest, body);
+            return BinarySerializer.DeserializeString(resp.respBody);
+        }
+
+        public async Task<string> ExecuteConditionAsync(int index, string name)
+        {
+            var body = BinarySerializer.SerializeString($"EXEC:{index}^{name}");
+            var resp = await _client.RequestAsync(MessageTypes.ConditionRequest, body);
+            // Response comes back as ConditionResult (0x0041) or through the same request's response
+            // In ServerDispatcher I made it return via the request's response if I use RequestAsync.
+            // Wait, I should check if I used seqNo correctly in ServerDispatcher.
+            return BinarySerializer.DeserializeString(resp.respBody);
+        }
+
         public void Disconnect()
         {
             _client.Disconnect();

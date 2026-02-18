@@ -59,6 +59,10 @@ namespace Bridge
         // ── 주문 극한테스트 ──
         public const ushort OrderTestRequest = 0x00A0;
         public const ushort OrderTestResponse = 0x00A1;
+        public const ushort SystemLogPush      = 0x00A2;
+        
+        public const ushort SystemStartRequest = 0x00A3;
+        public const ushort SystemStopRequest  = 0x00A4;
 
         // ── 시스템 ──
         public const ushort Heartbeat          = 0x00F0;

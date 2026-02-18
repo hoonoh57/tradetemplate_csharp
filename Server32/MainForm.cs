@@ -19,6 +19,57 @@ namespace Server32
             this.FormClosing += MainForm_FormClosing;
         }
 
+        protected override void OnLoad(EventArgs e)
+        {
+            base.OnLoad(e);
+            AutoStartPipe();
+        }
+
+        private void AutoStartPipe()
+        {
+            try
+            {
+                _pipeServer = new PipeServer();
+                _pipeServer.OnClientConnectionChanged += OnPipeConnection;
+                _pipeServer.OnError += err => SafeLog($"[PIPE ERR] {err}");
+                _ = _pipeServer.StartAsync();
+                UpdatePipeStatus(false);
+                Log("[PIPE] Named Pipe 서버 자동 대기중...");
+
+                _dispatcher = new ServerDispatcher(_pipeServer, this);
+                _dispatcher.OnLog += SafeLog;
+                _dispatcher.OnStatsUpdated += UpdateStats;
+            }
+            catch (Exception ex)
+            {
+                Log($"[ERR] Pipe 시작 실패: {ex.Message}");
+            }
+        }
+
+        public async Task StartTradingAsync()
+        {
+            if (btnStart.InvokeRequired)
+            {
+                await (Task)btnStart.Invoke(new Func<Task>(StartTradingAsync));
+                return;
+            }
+
+            if (!btnStart.Enabled) return;
+            btnStart_Click(null, null);
+        }
+
+        public void StopTrading()
+        {
+            if (btnStop.InvokeRequired)
+            {
+                btnStop.Invoke(new Action(StopTrading));
+                return;
+            }
+
+            if (!btnStop.Enabled) return;
+            btnStop_Click(null, null);
+        }
+
         private async void btnStart_Click(object sender, EventArgs e)
         {
             btnStart.Enabled = false;
@@ -36,9 +87,7 @@ namespace Server32
                 Log("[PIPE] Named Pipe 서버 대기중...");
 
                 // 2) 디스패처 생성 (키움/Cybos 초기화 포함)
-                _dispatcher = new ServerDispatcher(_pipeServer, this);
-                _dispatcher.OnLog += SafeLog;
-                _dispatcher.OnStatsUpdated += UpdateStats;
+                // _dispatcher 는 이미 OnLoad에서 생성됨
                 await _dispatcher.InitializeAsync();
 
                 Log("[OK] 서버 초기화 완료");

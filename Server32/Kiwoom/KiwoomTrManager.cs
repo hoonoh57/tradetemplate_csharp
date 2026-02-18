@@ -37,6 +37,7 @@ namespace Server32.Kiwoom
         private readonly List<StockSummary> _stockSummaries = new List<StockSummary>();
 
         public event Action<string> OnLog;
+        public event Action<string, string, string, string> OnRealCondition;
 
         public KiwoomTrManager(KiwoomConnector connector)
         {
@@ -258,6 +259,7 @@ namespace Server32.Kiwoom
             string name = _connector.GetMasterCodeName(code);
             string action = type == "I" ? "편입" : "이탈";
             OnLog?.Invoke($"[조건실시간] [{condName}] {code} {name} → {action}");
+            OnRealCondition?.Invoke(code, type, condName, condIndex);
         }
 
         // ══════════════════════════════════════════════

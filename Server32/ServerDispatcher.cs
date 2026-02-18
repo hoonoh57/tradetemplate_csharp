@@ -38,6 +38,21 @@ namespace Server32
             _pipe = pipe;
             _mainForm = mainForm;
             _pipe.OnMessageReceived += OnPipeMessage;
+
+            this.OnLog += msg => PushLog(msg);
+        }
+
+        private void PushLog(string msg)
+        {
+            try
+            {
+                if (_pipe.IsClientConnected)
+                {
+                    byte[] body = Encoding.UTF8.GetBytes(msg);
+                    _pipe.SendAsync(MessageTypes.SystemLogPush, 0, body).ConfigureAwait(false);
+                }
+            }
+            catch { }
         }
 
         public async Task InitializeAsync()
@@ -98,6 +113,12 @@ namespace Server32
                 {
                     _kiwoomTr = new KiwoomTrManager(_kiwoom);
                     _kiwoomTr.OnLog += msg => OnLog?.Invoke(msg);
+                    _kiwoomTr.OnRealCondition += (code, type, name, idx) =>
+                    {
+                        string payload = $"{code}|{type}|{name}|{idx}";
+                        _pipe.SendAsync(MessageTypes.ConditionRealtime, 0, Encoding.UTF8.GetBytes(payload)).ConfigureAwait(false);
+                    };
+
                     _kiwoomRealtime = new KiwoomRealtimeReceiver(_kiwoom);
                     _kiwoomRealtime.Initialize();
                     _kiwoomRealtime.OnMarketDataReceived += md => PushMarketData(md);
@@ -233,6 +254,20 @@ namespace Server32
                         break;
                     case MessageTypes.Heartbeat:
                         await _pipe.SendAsync(MessageTypes.Heartbeat, seqNo, null);
+                        break;
+
+                    case MessageTypes.ConditionRequest:
+                        await HandleConditionRequest(seqNo, body);
+                        break;
+
+                    case MessageTypes.SystemStartRequest:
+                        await _mainForm.StartTradingAsync();
+                        await _pipe.SendAsync(MessageTypes.SystemStartRequest, seqNo, null);
+                        break;
+
+                    case MessageTypes.SystemStopRequest:
+                        _mainForm.StopTrading();
+                        await _pipe.SendAsync(MessageTypes.SystemStopRequest, seqNo, null);
                         break;
 
                     case MessageTypes.OrderTestRequest:
@@ -383,6 +418,44 @@ namespace Server32
                 byte[] respBody = BinarySerializer.SerializeOrder(result);
                 await _pipe.SendAsync(MessageTypes.OrderResponse, seqNo, respBody);
                 OnLog?.Invoke("주문 응답: " + result.State);
+            }
+        }
+
+        private async Task HandleConditionRequest(uint seqNo, byte[] body)
+        {
+            string cmd = BinarySerializer.DeserializeString(body);
+            if (cmd == "LIST")
+            {
+                var list = await _kiwoomTr.LoadConditionListAsync();
+                var sb = new StringBuilder();
+                foreach (var c in list)
+                {
+                    if (sb.Length > 0) sb.Append(";");
+                    sb.Append($"{c.Index}^{c.Name}");
+                }
+                await _pipe.SendAsync(MessageTypes.ConditionRequest, seqNo, BinarySerializer.SerializeString(sb.ToString()));
+                OnLog?.Invoke($"[조건] 리스트 {list.Count}개 전송");
+            }
+            else if (cmd.StartsWith("EXEC:"))
+            {
+                string[] parts = cmd.Substring(5).Split('^');
+                if (parts.Length == 2 && int.TryParse(parts[0], out int idx))
+                {
+                    string name = parts[1];
+                    OnLog?.Invoke($"[조건] 실행 요청: {name} ({idx})");
+                    var codes = await _kiwoomTr.ExecuteConditionAsync(new Server32.Kiwoom.ConditionInfo { Index = idx, Name = name });
+                    
+                    var stockInfoList = new StringBuilder();
+                    foreach (var code in codes)
+                    {
+                        string cname = _kiwoom.GetMasterCodeName(code);
+                        if (stockInfoList.Length > 0) stockInfoList.Append(";");
+                        stockInfoList.Append($"{code}|{cname}|0");
+                    }
+
+                    await _pipe.SendAsync(MessageTypes.ConditionResult, seqNo, BinarySerializer.SerializeString(stockInfoList.ToString()));
+                    OnLog?.Invoke($"[조건] 실행 결과 {codes.Count}종목 전송");
+                }
             }
         }
 
