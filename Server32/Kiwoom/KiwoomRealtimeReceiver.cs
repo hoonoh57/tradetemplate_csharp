@@ -1,0 +1,103 @@
+using System;
+using System.Collections.Concurrent;
+using Common.Interfaces;
+using Common.Models;
+
+namespace Server32.Kiwoom
+{
+    /// <summary>
+    /// 키움 실시간 시세 수신 — SetRealReg 기반
+    /// Skills §2.4 실시간 FID 사전 준수
+    /// </summary>
+    public sealed class KiwoomRealtimeReceiver : IMarketDataReceiver
+    {
+        private readonly KiwoomConnector _conn;
+        private readonly ConcurrentDictionary<string, int> _screenMap = new ConcurrentDictionary<string, int>();
+        private int _screenCounter = 5000;
+
+        public event Action<MarketData> OnMarketDataReceived;
+        public event Action<TradeResult> OnTradeResultReceived;
+        public event Action<OrderInfo> OnOrderUpdateReceived;
+
+        private const string RealTimeFids = "10;11;12;13;14;15;16;17;18;20;25;26;27;28;29;30;31;32";
+
+        public KiwoomRealtimeReceiver(KiwoomConnector conn)
+        {
+            _conn = conn ?? throw new ArgumentNullException(nameof(conn));
+            // 이벤트 등록은 COM late-binding이므로 별도 처리 필요
+            // _conn.Api.OnReceiveRealData += OnReceiveRealData;
+        }
+
+        public void Subscribe(string code)
+        {
+            if (_screenMap.ContainsKey(code)) return;
+            int screen = System.Threading.Interlocked.Increment(ref _screenCounter);
+            _screenMap[code] = screen;
+            _conn.Api.SetRealReg(screen.ToString(), code, RealTimeFids, "1");
+        }
+
+        public void Unsubscribe(string code)
+        {
+            if (_screenMap.TryRemove(code, out _))
+            {
+                _conn.Api.SetRealRemove("ALL", code);
+            }
+        }
+
+        public void SubscribeAll()
+        {
+            // 조건검색 결과 종목 일괄 등록시 사용
+        }
+
+        public void UnsubscribeAll()
+        {
+            _conn.Api.SetRealRemove("ALL", "ALL");
+            _screenMap.Clear();
+        }
+
+        /// <summary>실시간 데이터 수신 핸들러 (COM 이벤트에서 호출)</summary>
+        public void ProcessRealData(string realKey, string realType)
+        {
+            if (realType != "주식체결" && realType != "주식시세") return;
+
+            try
+            {
+                var md = new MarketData(
+                    stockCode:  realKey,
+                    price:      Math.Abs(GetRealInt(realKey, 10)),
+                    change:     GetRealInt(realKey, 11),
+                    changeRate: GetRealFloat(realKey, 12),
+                    volume:     GetRealLong(realKey, 13),
+                    high:       Math.Abs(GetRealInt(realKey, 17)),
+                    low:        Math.Abs(GetRealInt(realKey, 18)),
+                    open:       Math.Abs(GetRealInt(realKey, 16)),
+                    tradeTime:  DateTime.Now,
+                    askPrice:   Math.Abs(GetRealInt(realKey, 27)),
+                    bidPrice:   Math.Abs(GetRealInt(realKey, 28))
+                );
+                OnMarketDataReceived?.Invoke(md);
+            }
+            catch { }
+        }
+
+        private int GetRealInt(string code, int fid)
+        {
+            string val = _conn.Api.GetCommRealData(code, fid)?.ToString().Trim() ?? "0";
+            val = val.Replace("+", "").Replace(",", "");
+            return int.TryParse(val, out int v) ? v : 0;
+        }
+
+        private long GetRealLong(string code, int fid)
+        {
+            string val = _conn.Api.GetCommRealData(code, fid)?.ToString().Trim() ?? "0";
+            val = val.Replace("+", "").Replace(",", "");
+            return long.TryParse(val, out long v) ? v : 0;
+        }
+
+        private float GetRealFloat(string code, int fid)
+        {
+            string val = _conn.Api.GetCommRealData(code, fid)?.ToString().Trim() ?? "0";
+            return float.TryParse(val, out float v) ? v : 0f;
+        }
+    }
+}
