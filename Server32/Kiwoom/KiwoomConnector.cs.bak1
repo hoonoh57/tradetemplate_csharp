@@ -1,0 +1,378 @@
+﻿using System;
+using System.Runtime.InteropServices;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+
+namespace Server32.Kiwoom
+{
+    /// <summary>
+    /// 키움 OpenAPI+ 접속 관리자
+    /// AxKHOpenAPI ActiveX 컨트롤 기반 — WinForms 필수
+    /// </summary>
+    public sealed class KiwoomConnector
+    {
+        private AxKHOpenAPI _api;
+        private bool _connected;
+        private TaskCompletionSource<int> _loginTcs;
+
+        /// <summary>COM API 인스턴스</summary>
+        public dynamic Api => _api;
+
+        /// <summary>접속 상태</summary>
+        public bool IsConnected => _connected;
+
+        /// <summary>모의투자 여부</summary>
+        public bool IsSimulation { get; private set; }
+
+        /// <summary>계좌 목록</summary>
+        public string[] Accounts { get; private set; } = Array.Empty<string>();
+
+        /// <summary>로그인 완료 이벤트</summary>
+        public event Action<bool> OnLoginCompleted;
+
+        /// <summary>
+        /// 초기화 — MainForm에 AxKHOpenAPI 컨트롤을 생성하고 배치
+        /// 반드시 UI 스레드에서 호출
+        /// </summary>
+        public bool Initialize(Form hostForm)
+        {
+            try
+            {
+                _api = new AxKHOpenAPI();
+                ((System.ComponentModel.ISupportInitialize)_api).BeginInit();
+                _api.Visible = false;
+                _api.Dock = DockStyle.None;
+                _api.Size = new System.Drawing.Size(0, 0);
+                hostForm.Controls.Add(_api);
+                ((System.ComponentModel.ISupportInitialize)_api).EndInit();
+
+                // 이벤트 등록
+                _api.OnEventConnect += Api_OnEventConnect;
+                _api.OnReceiveTrData += Api_OnReceiveTrData;
+                _api.OnReceiveRealData += Api_OnReceiveRealData;
+                _api.OnReceiveChejanData += Api_OnReceiveChejanData;
+                _api.OnReceiveMsg += Api_OnReceiveMsg;
+
+                return true;
+            }
+            catch (Exception)
+            {
+                _connected = false;
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 로그인 요청 (비동기) — CommConnect 호출 후 로그인 창 표시
+        /// OnEventConnect 이벤트로 결과 수신
+        /// </summary>
+        public async Task<bool> LoginAsync(int timeoutMs = 60000)
+        {
+            if (_api == null) return false;
+
+            _loginTcs = new TaskCompletionSource<int>();
+
+            int ret = _api.CommConnect();
+            if (ret != 0)
+            {
+                _connected = false;
+                return false;
+            }
+
+            // 로그인 창에서 사용자 입력 대기 (최대 60초)
+            var timeoutTask = Task.Delay(timeoutMs);
+            var completedTask = await Task.WhenAny(_loginTcs.Task, timeoutTask);
+
+            if (completedTask == timeoutTask)
+            {
+                _connected = false;
+                return false;
+            }
+
+            int errCode = _loginTcs.Task.Result;
+            _connected = errCode == 0;
+
+            if (_connected)
+            {
+                string accList = _api.GetLoginInfo("ACCLIST") ?? "";
+                Accounts = accList.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+                IsSimulation = _api.GetLoginInfo("GetServerGubun") == "1";
+            }
+
+            OnLoginCompleted?.Invoke(_connected);
+            return _connected;
+        }
+
+        /// <summary>로그인 결과 이벤트</summary>
+        private void Api_OnEventConnect(object sender, _DKHOpenAPIEvents_OnEventConnectEvent e)
+        {
+            _loginTcs?.TrySetResult(e.nErrCode);
+        }
+
+        /// <summary>TR 데이터 수신</summary>
+        public event Action<object, _DKHOpenAPIEvents_OnReceiveTrDataEvent> OnReceiveTrData;
+        private void Api_OnReceiveTrData(object sender, _DKHOpenAPIEvents_OnReceiveTrDataEvent e)
+        {
+            OnReceiveTrData?.Invoke(sender, e);
+        }
+
+        /// <summary>실시간 데이터 수신</summary>
+        public event Action<string, string, string> OnReceiveRealData;
+        private void Api_OnReceiveRealData(object sender, _DKHOpenAPIEvents_OnReceiveRealDataEvent e)
+        {
+            OnReceiveRealData?.Invoke(e.sRealKey, e.sRealType, e.sRealData);
+        }
+
+        /// <summary>체결/잔고 수신</summary>
+        public event Action<object, _DKHOpenAPIEvents_OnReceiveChejanDataEvent> OnReceiveChejanData;
+        private void Api_OnReceiveChejanData(object sender, _DKHOpenAPIEvents_OnReceiveChejanDataEvent e)
+        {
+            OnReceiveChejanData?.Invoke(sender, e);
+        }
+
+        /// <summary>메시지 수신</summary>
+        private void Api_OnReceiveMsg(object sender, _DKHOpenAPIEvents_OnReceiveMsgEvent e)
+        {
+            // 로그용
+        }
+
+        /// <summary>첫 번째 계좌번호</summary>
+        public string GetFirstAccount()
+        {
+            return Accounts.Length > 0 ? Accounts[0] : "";
+        }
+
+        // ── API 래퍼 메서드 (다른 모듈에서 사용) ──
+
+        public void SetInputValue(string id, string value)
+        {
+            _api?.SetInputValue(id, value);
+        }
+
+        public int CommRqData(string rqName, string trCode, int prevNext, string screenNo)
+        {
+            return _api?.CommRqData(rqName, trCode, prevNext, screenNo) ?? -1;
+        }
+
+        public string GetCommData(string trCode, string rqName, int index, string itemName)
+        {
+            return _api?.GetCommData(trCode, rqName, index, itemName)?.Trim() ?? "";
+        }
+
+        public int GetRepeatCnt(string trCode, string rqName)
+        {
+            return _api?.GetRepeatCnt(trCode, rqName) ?? 0;
+        }
+
+        public string GetCommRealData(string code, int fid)
+        {
+            return _api?.GetCommRealData(code, fid)?.Trim() ?? "";
+        }
+
+        public int SetRealReg(string screenNo, string codeList, string fidList, string optType)
+        {
+            return _api?.SetRealReg(screenNo, codeList, fidList, optType) ?? -1;
+        }
+
+        public void SetRealRemove(string screenNo, string code)
+        {
+            _api?.SetRealRemove(screenNo, code);
+        }
+
+        public int SendOrder(string rqName, string screenNo, string accNo,
+            int orderType, string code, int qty, int price, string hogaGb, string orgOrderNo)
+        {
+            return _api?.SendOrder(rqName, screenNo, accNo,
+                orderType, code, qty, price, hogaGb, orgOrderNo) ?? -1;
+        }
+    }
+
+    // ═══════════════════════════════════════════
+    //  AxKHOpenAPI — ActiveX Wrapper
+    //  키움 OpenAPI+ COM: KHOpenAPI.KHOpenAPICtrl.1
+    // ═══════════════════════════════════════════
+
+    [System.Runtime.InteropServices.ComVisible(true)]
+    public class AxKHOpenAPI : AxHost
+    {
+        private dynamic _ocx;
+
+        public AxKHOpenAPI() : base("A1574A0D-6BFA-4BD7-9020-DED88711818D") { }
+
+        protected override void AttachInterfaces()
+        {
+            _ocx = this.GetOcx();
+        }
+
+        // ── 메서드 ──
+
+        public int CommConnect()
+        {
+            return (int)_ocx.CommConnect();
+        }
+
+        public int GetConnectState()
+        {
+            return (int)_ocx.GetConnectState();
+        }
+
+        public string GetLoginInfo(string tag)
+        {
+            return _ocx.GetLoginInfo(tag)?.ToString() ?? "";
+        }
+
+        public void SetInputValue(string id, string value)
+        {
+            _ocx.SetInputValue(id, value);
+        }
+
+        public int CommRqData(string rqName, string trCode, int prevNext, string screenNo)
+        {
+            return (int)_ocx.CommRqData(rqName, trCode, prevNext, screenNo);
+        }
+
+        public string GetCommData(string trCode, string rqName, int index, string itemName)
+        {
+            return _ocx.GetCommData(trCode, rqName, index, itemName)?.ToString() ?? "";
+        }
+
+        public int GetRepeatCnt(string trCode, string rqName)
+        {
+            return (int)_ocx.GetRepeatCnt(trCode, rqName);
+        }
+
+        public string GetCommRealData(string code, int fid)
+        {
+            return _ocx.GetCommRealData(code, fid)?.ToString() ?? "";
+        }
+
+        public int SetRealReg(string screenNo, string codeList, string fidList, string optType)
+        {
+            return (int)_ocx.SetRealReg(screenNo, codeList, fidList, optType);
+        }
+
+        public void SetRealRemove(string screenNo, string code)
+        {
+            _ocx.SetRealRemove(screenNo, code);
+        }
+
+        public int SendOrder(string rqName, string screenNo, string accNo,
+            int orderType, string code, int qty, int price, string hogaGb, string orgOrderNo)
+        {
+            return (int)_ocx.SendOrder(rqName, screenNo, accNo,
+                orderType, code, qty, price, hogaGb, orgOrderNo);
+        }
+
+        // ── 이벤트 ──
+
+        public event EventHandler<_DKHOpenAPIEvents_OnEventConnectEvent> OnEventConnect;
+        public event EventHandler<_DKHOpenAPIEvents_OnReceiveTrDataEvent> OnReceiveTrData;
+        public event EventHandler<_DKHOpenAPIEvents_OnReceiveRealDataEvent> OnReceiveRealData;
+        public event EventHandler<_DKHOpenAPIEvents_OnReceiveChejanDataEvent> OnReceiveChejanData;
+        public event EventHandler<_DKHOpenAPIEvents_OnReceiveMsgEvent> OnReceiveMsg;
+
+        protected override void CreateSink()
+        {
+            // AxHost 이벤트 싱크 — COM 이벤트를 .NET 이벤트로 브릿지
+        }
+
+        // OCX 이벤트 핸들러 (내부에서 호출)
+        internal void RaiseOnEventConnect(int errCode)
+        {
+            OnEventConnect?.Invoke(this, new _DKHOpenAPIEvents_OnEventConnectEvent(errCode));
+        }
+
+        internal void RaiseOnReceiveTrData(string scrNo, string rqName, string trCode,
+            string recordName, string prevNext, int dataLen, string errCode,
+            string msg, string splmMsg)
+        {
+            OnReceiveTrData?.Invoke(this, new _DKHOpenAPIEvents_OnReceiveTrDataEvent(
+                scrNo, rqName, trCode, recordName, prevNext, dataLen, errCode, msg, splmMsg));
+        }
+
+        internal void RaiseOnReceiveRealData(string realKey, string realType, string realData)
+        {
+            OnReceiveRealData?.Invoke(this, new _DKHOpenAPIEvents_OnReceiveRealDataEvent(
+                realKey, realType, realData));
+        }
+
+        internal void RaiseOnReceiveChejanData(string gubun, int itemCnt, string fidList)
+        {
+            OnReceiveChejanData?.Invoke(this, new _DKHOpenAPIEvents_OnReceiveChejanDataEvent(
+                gubun, itemCnt, fidList));
+        }
+
+        internal void RaiseOnReceiveMsg(string scrNo, string rqName, string trCode, string msg)
+        {
+            OnReceiveMsg?.Invoke(this, new _DKHOpenAPIEvents_OnReceiveMsgEvent(
+                scrNo, rqName, trCode, msg));
+        }
+    }
+
+    // ── 이벤트 인자 클래스 ──
+
+    public class _DKHOpenAPIEvents_OnEventConnectEvent : EventArgs
+    {
+        public int nErrCode { get; }
+        public _DKHOpenAPIEvents_OnEventConnectEvent(int errCode) { nErrCode = errCode; }
+    }
+
+    public class _DKHOpenAPIEvents_OnReceiveTrDataEvent : EventArgs
+    {
+        public string sScrNo { get; }
+        public string sRQName { get; }
+        public string sTrCode { get; }
+        public string sRecordName { get; }
+        public string sPrevNext { get; }
+        public int nDataLength { get; }
+        public string sErrorCode { get; }
+        public string sMessage { get; }
+        public string sSplmMsg { get; }
+
+        public _DKHOpenAPIEvents_OnReceiveTrDataEvent(string scrNo, string rqName,
+            string trCode, string recordName, string prevNext, int dataLen,
+            string errCode, string msg, string splmMsg)
+        {
+            sScrNo = scrNo; sRQName = rqName; sTrCode = trCode;
+            sRecordName = recordName; sPrevNext = prevNext; nDataLength = dataLen;
+            sErrorCode = errCode; sMessage = msg; sSplmMsg = splmMsg;
+        }
+    }
+
+    public class _DKHOpenAPIEvents_OnReceiveRealDataEvent : EventArgs
+    {
+        public string sRealKey { get; }
+        public string sRealType { get; }
+        public string sRealData { get; }
+
+        public _DKHOpenAPIEvents_OnReceiveRealDataEvent(string realKey, string realType, string realData)
+        {
+            sRealKey = realKey; sRealType = realType; sRealData = realData;
+        }
+    }
+
+    public class _DKHOpenAPIEvents_OnReceiveChejanDataEvent : EventArgs
+    {
+        public string sGubun { get; }
+        public int nItemCnt { get; }
+        public string sFIdList { get; }
+
+        public _DKHOpenAPIEvents_OnReceiveChejanDataEvent(string gubun, int itemCnt, string fidList)
+        {
+            sGubun = gubun; nItemCnt = itemCnt; sFIdList = fidList;
+        }
+    }
+
+    public class _DKHOpenAPIEvents_OnReceiveMsgEvent : EventArgs
+    {
+        public string sScrNo { get; }
+        public string sRQName { get; }
+        public string sTrCode { get; }
+        public string sMsg { get; }
+
+        public _DKHOpenAPIEvents_OnReceiveMsgEvent(string scrNo, string rqName, string trCode, string msg)
+        {
+            sScrNo = scrNo; sRQName = rqName; sTrCode = trCode; sMsg = msg;
+        }
+    }
+}

@@ -293,177 +293,177 @@ namespace Server32.Kiwoom
         {
             _host.RaiseOnReceiveChejanData(sGubun, nItemCnt, sFIdList);
         }
-    }
 
-    // ══════════════════════════════════════════════
-    //  KiwoomConnector — 상위 비즈니스 로직
-    // ══════════════════════════════════════════════
+        // ══════════════════════════════════════════════
+        //  KiwoomConnector — 상위 비즈니스 로직
+        // ══════════════════════════════════════════════
 
-    public sealed class KiwoomConnector
-    {
-        private AxKHOpenAPI _api;
-        private bool _connected;
-        private TaskCompletionSource<int> _loginTcs;
-
-        public AxKHOpenAPI Api => _api;
-        public bool IsConnected => _connected;
-        public bool IsSimulation { get; private set; }
-        public string[] Accounts { get; private set; } = Array.Empty<string>();
-
-        // ── 이벤트 (외부 소비자) ──
-        public event Action<bool> OnLoginCompleted;
-        public event Action<string, string, string> OnReceiveRealData;
-        public event Action<_DKHOpenAPIEvents_OnReceiveTrDataEvent> OnReceiveTrData;
-        public event Action<_DKHOpenAPIEvents_OnReceiveChejanDataEvent> OnReceiveChejanData;
-        public event Action<string, string, string, string> OnReceiveMsg;
-
-        /// <summary>
-        /// AxKHOpenAPI를 MainForm에 배치 (UI 스레드 필수)
-        /// </summary>
-        public bool Initialize(Form hostForm)
+        public sealed class KiwoomConnector
         {
-            try
+            private AxKHOpenAPI _api;
+            private bool _connected;
+            private TaskCompletionSource<int> _loginTcs;
+
+            public AxKHOpenAPI Api => _api;
+            public bool IsConnected => _connected;
+            public bool IsSimulation { get; private set; }
+            public string[] Accounts { get; private set; } = Array.Empty<string>();
+
+            // ── 이벤트 (외부 소비자) ──
+            public event Action<bool> OnLoginCompleted;
+            public event Action<string, string, string> OnReceiveRealData;
+            public event Action<_DKHOpenAPIEvents_OnReceiveTrDataEvent> OnReceiveTrData;
+            public event Action<_DKHOpenAPIEvents_OnReceiveChejanDataEvent> OnReceiveChejanData;
+            public event Action<string, string, string, string> OnReceiveMsg;
+
+            /// <summary>
+            /// AxKHOpenAPI를 MainForm에 배치 (UI 스레드 필수)
+            /// </summary>
+            public bool Initialize(Form hostForm)
             {
-                _api = new AxKHOpenAPI();
-                ((System.ComponentModel.ISupportInitialize)_api).BeginInit();
-                _api.Visible = false;
-                _api.Dock = DockStyle.None;
-                _api.Size = new System.Drawing.Size(0, 0);
-                _api.Location = new System.Drawing.Point(0, 0);
-                hostForm.Controls.Add(_api);
-                ((System.ComponentModel.ISupportInitialize)_api).EndInit();
-
-                // 이벤트 연결
-                _api.OnEventConnect += Api_OnEventConnect;
-                _api.OnReceiveTrData += Api_OnReceiveTrData;
-                _api.OnReceiveRealData += Api_OnReceiveRealData;
-                _api.OnReceiveChejanData += Api_OnReceiveChejanData;
-                _api.OnReceiveMsg += Api_OnReceiveMsg;
-
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        /// <summary>비동기 로그인 — 이벤트 우선, 폴링 fallback</summary>
-        public async Task<bool> LoginAsync(int timeoutMs = 60000)
-        {
-            if (_api == null) return false;
-
-            _loginTcs = new TaskCompletionSource<int>();
-            int ret = _api.CommConnect();
-            if (ret != 0) { _connected = false; return false; }
-
-            // 1차: 이벤트 기반 대기 (3초)
-            var evtCompleted = await Task.WhenAny(_loginTcs.Task, Task.Delay(3000));
-            if (evtCompleted == _loginTcs.Task)
-            {
-                int errCode = _loginTcs.Task.Result;
-                _connected = (errCode == 0);
-            }
-            else
-            {
-                // 2차: 이벤트 미수신 시 폴링으로 전환
-                int elapsed = 3000;
-                while (elapsed < timeoutMs)
+                try
                 {
-                    await Task.Delay(500);
-                    elapsed += 500;
+                    _api = new AxKHOpenAPI();
+                    ((System.ComponentModel.ISupportInitialize)_api).BeginInit();
+                    _api.Visible = false;
+                    _api.Dock = DockStyle.None;
+                    _api.Size = new System.Drawing.Size(0, 0);
+                    _api.Location = new System.Drawing.Point(0, 0);
+                    hostForm.Controls.Add(_api);
+                    ((System.ComponentModel.ISupportInitialize)_api).EndInit();
 
-                    try
-                    {
-                        int state = _api.GetConnectState();
-                        if (state == 1)
-                        {
-                            _connected = true;
-                            break;
-                        }
-                    }
-                    catch { /* COM 오류 무시 */ }
+                    // 이벤트 연결
+                    _api.OnEventConnect += Api_OnEventConnect;
+                    _api.OnReceiveTrData += Api_OnReceiveTrData;
+                    _api.OnReceiveRealData += Api_OnReceiveRealData;
+                    _api.OnReceiveChejanData += Api_OnReceiveChejanData;
+                    _api.OnReceiveMsg += Api_OnReceiveMsg;
+
+                    return true;
+                }
+                catch
+                {
+                    return false;
                 }
             }
 
-            if (_connected)
+            /// <summary>비동기 로그인 — 이벤트 우선, 폴링 fallback</summary>
+            public async Task<bool> LoginAsync(int timeoutMs = 60000)
             {
-                string accList = _api.GetLoginInfo("ACCLIST") ?? "";
-                Accounts = accList.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
-                IsSimulation = _api.GetLoginInfo("GetServerGubun") == "1";
+                if (_api == null) return false;
+
+                _loginTcs = new TaskCompletionSource<int>();
+                int ret = _api.CommConnect();
+                if (ret != 0) { _connected = false; return false; }
+
+                // 1차: 이벤트 기반 대기 (3초)
+                var evtCompleted = await Task.WhenAny(_loginTcs.Task, Task.Delay(3000));
+                if (evtCompleted == _loginTcs.Task)
+                {
+                    int errCode = _loginTcs.Task.Result;
+                    _connected = (errCode == 0);
+                }
+                else
+                {
+                    // 2차: 이벤트 미수신 시 폴링으로 전환
+                    int elapsed = 3000;
+                    while (elapsed < timeoutMs)
+                    {
+                        await Task.Delay(500);
+                        elapsed += 500;
+
+                        try
+                        {
+                            int state = _api.GetConnectState();
+                            if (state == 1)
+                            {
+                                _connected = true;
+                                break;
+                            }
+                        }
+                        catch { /* COM 오류 무시 */ }
+                    }
+                }
+
+                if (_connected)
+                {
+                    string accList = _api.GetLoginInfo("ACCLIST") ?? "";
+                    Accounts = accList.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+                    IsSimulation = _api.GetLoginInfo("GetServerGubun") == "1";
+                }
+
+                OnLoginCompleted?.Invoke(_connected);
+                return _connected;
             }
 
-            OnLoginCompleted?.Invoke(_connected);
-            return _connected;
+            // ── COM 이벤트 핸들러 ──
+
+            private void Api_OnEventConnect(object sender, _DKHOpenAPIEvents_OnEventConnectEvent e)
+            {
+                _loginTcs?.TrySetResult(e.nErrCode);
+            }
+
+            private void Api_OnReceiveTrData(object sender, _DKHOpenAPIEvents_OnReceiveTrDataEvent e)
+            {
+                OnReceiveTrData?.Invoke(e);
+            }
+
+            private void Api_OnReceiveRealData(object sender, _DKHOpenAPIEvents_OnReceiveRealDataEvent e)
+            {
+                OnReceiveRealData?.Invoke(e.sRealKey, e.sRealType, e.sRealData);
+            }
+
+            private void Api_OnReceiveChejanData(object sender, _DKHOpenAPIEvents_OnReceiveChejanDataEvent e)
+            {
+                OnReceiveChejanData?.Invoke(e);
+            }
+
+            private void Api_OnReceiveMsg(object sender, _DKHOpenAPIEvents_OnReceiveMsgEvent e)
+            {
+                OnReceiveMsg?.Invoke(e.sScrNo, e.sRQName, e.sTrCode, e.sMsg);
+            }
+
+            // ── API 래퍼 ──
+
+            public string GetFirstAccount()
+                => Accounts.Length > 0 ? Accounts[0] : "";
+
+            public void SetInputValue(string id, string value)
+                => _api?.SetInputValue(id, value);
+
+            public int CommRqData(string rqName, string trCode, int prevNext, string screenNo)
+                => _api?.CommRqData(rqName, trCode, prevNext, screenNo) ?? -1;
+
+            public string GetCommData(string trCode, string rqName, int index, string itemName)
+                => _api?.GetCommData(trCode, rqName, index, itemName)?.Trim() ?? "";
+
+            public int GetRepeatCnt(string trCode, string rqName)
+                => _api?.GetRepeatCnt(trCode, rqName) ?? 0;
+
+            public string GetCommRealData(string code, int fid)
+                => _api?.GetCommRealData(code, fid)?.Trim() ?? "";
+
+            public int SetRealReg(string screenNo, string codeList, string fidList, string optType)
+                => _api?.SetRealReg(screenNo, codeList, fidList, optType) ?? -1;
+
+            public void SetRealRemove(string screenNo, string code)
+                => _api?.SetRealRemove(screenNo, code);
+
+            public int SendOrder(string rqName, string screenNo, string accNo,
+                int orderType, string code, int qty, int price, string hogaGb, string orgOrderNo)
+                => _api?.SendOrder(rqName, screenNo, accNo, orderType, code, qty, price, hogaGb, orgOrderNo) ?? -1;
+
+            public string GetChejanData(int fid)
+                => _api?.GetChejanData(fid)?.Trim() ?? "";
+
+            public string[] GetCodeListByMarket(string marketCode)
+            {
+                string codes = _api?.GetCodeListByMarket(marketCode) ?? "";
+                return codes.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+            }
+
+            public string GetMasterCodeName(string code)
+                => _api?.GetMasterCodeName(code) ?? "";
         }
-
-        // ── COM 이벤트 핸들러 ──
-
-        private void Api_OnEventConnect(object sender, _DKHOpenAPIEvents_OnEventConnectEvent e)
-        {
-            _loginTcs?.TrySetResult(e.nErrCode);
-        }
-
-        private void Api_OnReceiveTrData(object sender, _DKHOpenAPIEvents_OnReceiveTrDataEvent e)
-        {
-            OnReceiveTrData?.Invoke(e);
-        }
-
-        private void Api_OnReceiveRealData(object sender, _DKHOpenAPIEvents_OnReceiveRealDataEvent e)
-        {
-            OnReceiveRealData?.Invoke(e.sRealKey, e.sRealType, e.sRealData);
-        }
-
-        private void Api_OnReceiveChejanData(object sender, _DKHOpenAPIEvents_OnReceiveChejanDataEvent e)
-        {
-            OnReceiveChejanData?.Invoke(e);
-        }
-
-        private void Api_OnReceiveMsg(object sender, _DKHOpenAPIEvents_OnReceiveMsgEvent e)
-        {
-            OnReceiveMsg?.Invoke(e.sScrNo, e.sRQName, e.sTrCode, e.sMsg);
-        }
-
-        // ── API 래퍼 ──
-
-        public string GetFirstAccount()
-            => Accounts.Length > 0 ? Accounts[0] : "";
-
-        public void SetInputValue(string id, string value)
-            => _api?.SetInputValue(id, value);
-
-        public int CommRqData(string rqName, string trCode, int prevNext, string screenNo)
-            => _api?.CommRqData(rqName, trCode, prevNext, screenNo) ?? -1;
-
-        public string GetCommData(string trCode, string rqName, int index, string itemName)
-            => _api?.GetCommData(trCode, rqName, index, itemName)?.Trim() ?? "";
-
-        public int GetRepeatCnt(string trCode, string rqName)
-            => _api?.GetRepeatCnt(trCode, rqName) ?? 0;
-
-        public string GetCommRealData(string code, int fid)
-            => _api?.GetCommRealData(code, fid)?.Trim() ?? "";
-
-        public int SetRealReg(string screenNo, string codeList, string fidList, string optType)
-            => _api?.SetRealReg(screenNo, codeList, fidList, optType) ?? -1;
-
-        public void SetRealRemove(string screenNo, string code)
-            => _api?.SetRealRemove(screenNo, code);
-
-        public int SendOrder(string rqName, string screenNo, string accNo,
-            int orderType, string code, int qty, int price, string hogaGb, string orgOrderNo)
-            => _api?.SendOrder(rqName, screenNo, accNo, orderType, code, qty, price, hogaGb, orgOrderNo) ?? -1;
-
-        public string GetChejanData(int fid)
-            => _api?.GetChejanData(fid)?.Trim() ?? "";
-
-        public string[] GetCodeListByMarket(string marketCode)
-        {
-            string codes = _api?.GetCodeListByMarket(marketCode) ?? "";
-            return codes.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
-        }
-
-        public string GetMasterCodeName(string code)
-            => _api?.GetMasterCodeName(code) ?? "";
     }
 }

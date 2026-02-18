@@ -348,7 +348,7 @@ namespace Server32.Kiwoom
             }
         }
 
-        /// <summary>비동기 로그인 — 이벤트 우선, 폴링 fallback</summary>
+        /// <summary>비동기 로그인</summary>
         public async Task<bool> LoginAsync(int timeoutMs = 60000)
         {
             if (_api == null) return false;
@@ -357,34 +357,11 @@ namespace Server32.Kiwoom
             int ret = _api.CommConnect();
             if (ret != 0) { _connected = false; return false; }
 
-            // 1차: 이벤트 기반 대기 (3초)
-            var evtCompleted = await Task.WhenAny(_loginTcs.Task, Task.Delay(3000));
-            if (evtCompleted == _loginTcs.Task)
-            {
-                int errCode = _loginTcs.Task.Result;
-                _connected = (errCode == 0);
-            }
-            else
-            {
-                // 2차: 이벤트 미수신 시 폴링으로 전환
-                int elapsed = 3000;
-                while (elapsed < timeoutMs)
-                {
-                    await Task.Delay(500);
-                    elapsed += 500;
+            var completed = await Task.WhenAny(_loginTcs.Task, Task.Delay(timeoutMs));
+            if (completed != _loginTcs.Task) { _connected = false; return false; }
 
-                    try
-                    {
-                        int state = _api.GetConnectState();
-                        if (state == 1)
-                        {
-                            _connected = true;
-                            break;
-                        }
-                    }
-                    catch { /* COM 오류 무시 */ }
-                }
-            }
+            int errCode = _loginTcs.Task.Result;
+            _connected = (errCode == 0);
 
             if (_connected)
             {

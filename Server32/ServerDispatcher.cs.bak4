@@ -41,34 +41,29 @@ namespace Server32
 
         public async Task InitializeAsync()
         {
-            // ★ 1단계: Cybos 먼저 체크 (필수)
-            try
-            {
-                _cybos = new CybosConnector();
-            }
-            catch (Exception ex)
-            {
-                OnLog?.Invoke("[ERR] CybosPlus COM 초기화 실패: " + ex.Message);
-                MessageBox.Show("Cybos 연결을 확인하세요!\nCybosPlus를 먼저 실행 후 관리자 권한으로 다시 시작하세요.",
-                    "Cybos 연결 오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                Application.Exit();
-                return;
-            }
+            // 키움 초기화
+            _kiwoom = new KiwoomConnector();
+            bool kiwoomOk = _kiwoom.Initialize();
+            _mainForm.UpdateKiwoomStatus(kiwoomOk);
+            OnLog?.Invoke(kiwoomOk ? "[키움] 접속 성공" : "[키움] 접속 실패");
 
-            if (!_cybos.IsConnected)
+            if (kiwoomOk)
             {
-                OnLog?.Invoke("[ERR] CybosPlus 미접속 상태");
-                MessageBox.Show("Cybos 연결을 확인하세요!\nCybosPlus가 로그인되어 있지 않습니다.",
-                    "Cybos 연결 오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                Application.Exit();
-                return;
+                _kiwoomTr = new KiwoomTrManager(_kiwoom);
+                _kiwoomRealtime = new KiwoomRealtimeReceiver(_kiwoom);
+                _kiwoomRealtime.Initialize();
+                _kiwoomRealtime.OnMarketDataReceived += md => PushMarketData(md);
+                _kiwoomOrder = new KiwoomOrderExecutor(_kiwoom);
+                _kiwoomOrder.SetAccount(_kiwoom.GetFirstAccount());
             }
 
-            _cybos.InitTrade();
-            _mainForm.UpdateCybosStatus(true);
-            OnLog?.Invoke("[Cybos] 접속 확인 완료");
+            // Cybos 초기화
+            _cybos = new CybosConnector();
+            bool cybosOk = _cybos.IsConnected;
+            if (cybosOk) _cybos.InitTrade();
+            _mainForm.UpdateCybosStatus(cybosOk);
 
-            if (true)
+            if (cybosOk)
             {
                 _cybosChart = new CybosStockChart(_cybos);
                 _cybosChart.Initialize();
@@ -77,36 +72,9 @@ namespace Server32
                 _cybosRealtime.OnMarketDataReceived += md => PushMarketData(md);
                 _cybosOrder = new CybosOrderExecutor(_cybos);
                 _cybosOrder.Initialize();
-                OnLog?.Invoke("[Cybos] 차트/실시간/주문 모듈 초기화 완료");
             }
 
-            // ★ 2단계: 키움 초기화 (Cybos 이후)
-            _kiwoom = new KiwoomConnector();
-            bool kiwoomInit = _kiwoom.Initialize(_mainForm);
-            if (kiwoomInit)
-            {
-                OnLog?.Invoke("[키움] COM 초기화 성공, 로그인 시도...");
-                bool kiwoomOk = await _kiwoom.LoginAsync(60000);
-                _mainForm.UpdateKiwoomStatus(kiwoomOk);
-                OnLog?.Invoke(kiwoomOk
-                    ? "[키움] 로그인 성공. 계좌: " + _kiwoom.GetFirstAccount()
-                    : "[키움] 로그인 실패 또는 타임아웃");
-
-                if (kiwoomOk)
-                {
-                    _kiwoomTr = new KiwoomTrManager(_kiwoom);
-                    _kiwoomRealtime = new KiwoomRealtimeReceiver(_kiwoom);
-                    _kiwoomRealtime.Initialize();
-                    _kiwoomRealtime.OnMarketDataReceived += md => PushMarketData(md);
-                    _kiwoomOrder = new KiwoomOrderExecutor(_kiwoom);
-                    _kiwoomOrder.SetAccount(_kiwoom.GetFirstAccount());
-                }
-            }
-            else
-            {
-                _mainForm.UpdateKiwoomStatus(false);
-                OnLog?.Invoke("[키움] COM 초기화 실패 (OpenAPI 미설치?)");
-            }
+            await Task.CompletedTask;
         }
 
         public void Shutdown()

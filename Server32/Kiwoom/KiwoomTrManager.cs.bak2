@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using AxKHOpenAPILib;
 using Common.Enums;
 using Common.Models;
 
@@ -42,7 +41,7 @@ namespace Server32.Kiwoom
             return _candleBuffer.AsReadOnly();
         }
 
-        private void OnTrDataReceived(_DKHOpenAPIEvents_OnReceiveTrDataEvent e)
+        private void OnTrDataReceived(object sender, _DKHOpenAPIEvents_OnReceiveTrDataEvent e)
         {
             if (e.sRQName != _lastRqName) return;
 

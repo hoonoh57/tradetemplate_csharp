@@ -34,6 +34,13 @@
     <PlatformTarget>x86</PlatformTarget>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="AxInterop.KHOpenAPILib">
+      <HintPath>C:\Users\haoru\Desktop\2025\Template\lib\AxInterop.KHOpenAPILib.dll</HintPath>
+    </Reference>
+    <Reference Include="Interop.KHOpenAPILib">
+      <HintPath>C:\Users\haoru\Desktop\2025\Template\lib\Interop.KHOpenAPILib.dll</HintPath>
+      <EmbedInteropTypes>True</EmbedInteropTypes>
+    </Reference>
     <Reference Include="Microsoft.CSharp" />
     <Reference Include="System" />
     <Reference Include="System.Core" />

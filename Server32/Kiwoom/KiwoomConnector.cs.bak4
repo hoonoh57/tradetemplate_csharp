@@ -294,61 +294,6 @@ namespace Server32.Kiwoom
             _host.RaiseOnReceiveChejanData(sGubun, nItemCnt, sFIdList);
         }
     }
-
-    // ══════════════════════════════════════════════
-    //  KiwoomConnector — 상위 비즈니스 로직
-    // ══════════════════════════════════════════════
-
-    public sealed class KiwoomConnector
-    {
-        private AxKHOpenAPI _api;
-        private bool _connected;
-        private TaskCompletionSource<int> _loginTcs;
-
-        public AxKHOpenAPI Api => _api;
-        public bool IsConnected => _connected;
-        public bool IsSimulation { get; private set; }
-        public string[] Accounts { get; private set; } = Array.Empty<string>();
-
-        // ── 이벤트 (외부 소비자) ──
-        public event Action<bool> OnLoginCompleted;
-        public event Action<string, string, string> OnReceiveRealData;
-        public event Action<_DKHOpenAPIEvents_OnReceiveTrDataEvent> OnReceiveTrData;
-        public event Action<_DKHOpenAPIEvents_OnReceiveChejanDataEvent> OnReceiveChejanData;
-        public event Action<string, string, string, string> OnReceiveMsg;
-
-        /// <summary>
-        /// AxKHOpenAPI를 MainForm에 배치 (UI 스레드 필수)
-        /// </summary>
-        public bool Initialize(Form hostForm)
-        {
-            try
-            {
-                _api = new AxKHOpenAPI();
-                ((System.ComponentModel.ISupportInitialize)_api).BeginInit();
-                _api.Visible = false;
-                _api.Dock = DockStyle.None;
-                _api.Size = new System.Drawing.Size(0, 0);
-                _api.Location = new System.Drawing.Point(0, 0);
-                hostForm.Controls.Add(_api);
-                ((System.ComponentModel.ISupportInitialize)_api).EndInit();
-
-                // 이벤트 연결
-                _api.OnEventConnect += Api_OnEventConnect;
-                _api.OnReceiveTrData += Api_OnReceiveTrData;
-                _api.OnReceiveRealData += Api_OnReceiveRealData;
-                _api.OnReceiveChejanData += Api_OnReceiveChejanData;
-                _api.OnReceiveMsg += Api_OnReceiveMsg;
-
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        /// <summary>비동기 로그인 — 이벤트 우선, 폴링 fallback</summary>
         public async Task<bool> LoginAsync(int timeoutMs = 60000)
         {
             if (_api == null) return false;
@@ -385,6 +330,65 @@ namespace Server32.Kiwoom
                     catch { /* COM 오류 무시 */ }
                 }
             }
+
+            if (_connected)
+            {
+                string accList = _api.GetLoginInfo("ACCLIST") ?? "";
+                Accounts = accList.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+                IsSimulation = _api.GetLoginInfo("GetServerGubun") == "1";
+            }
+
+            OnLoginCompleted?.Invoke(_connected);
+            return _connected;
+        }
+        public event Action<_DKHOpenAPIEvents_OnReceiveChejanDataEvent> OnReceiveChejanData;
+        public event Action<string, string, string, string> OnReceiveMsg;
+
+        /// <summary>
+        /// AxKHOpenAPI를 MainForm에 배치 (UI 스레드 필수)
+        /// </summary>
+        public bool Initialize(Form hostForm)
+        {
+            try
+            {
+                _api = new AxKHOpenAPI();
+                ((System.ComponentModel.ISupportInitialize)_api).BeginInit();
+                _api.Visible = false;
+                _api.Dock = DockStyle.None;
+                _api.Size = new System.Drawing.Size(0, 0);
+                _api.Location = new System.Drawing.Point(0, 0);
+                hostForm.Controls.Add(_api);
+                ((System.ComponentModel.ISupportInitialize)_api).EndInit();
+
+                // 이벤트 연결
+                _api.OnEventConnect += Api_OnEventConnect;
+                _api.OnReceiveTrData += Api_OnReceiveTrData;
+                _api.OnReceiveRealData += Api_OnReceiveRealData;
+                _api.OnReceiveChejanData += Api_OnReceiveChejanData;
+                _api.OnReceiveMsg += Api_OnReceiveMsg;
+
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>비동기 로그인</summary>
+        public async Task<bool> LoginAsync(int timeoutMs = 60000)
+        {
+            if (_api == null) return false;
+
+            _loginTcs = new TaskCompletionSource<int>();
+            int ret = _api.CommConnect();
+            if (ret != 0) { _connected = false; return false; }
+
+            var completed = await Task.WhenAny(_loginTcs.Task, Task.Delay(timeoutMs));
+            if (completed != _loginTcs.Task) { _connected = false; return false; }
+
+            int errCode = _loginTcs.Task.Result;
+            _connected = (errCode == 0);
 
             if (_connected)
             {
