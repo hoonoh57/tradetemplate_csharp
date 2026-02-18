@@ -21,6 +21,7 @@ namespace Server32
         private KiwoomTrManager _kiwoomTr;
         private KiwoomRealtimeReceiver _kiwoomRealtime;
         private KiwoomOrderExecutor _kiwoomOrder;
+        private OrderManager _orderManager;
         private CybosConnector _cybos;
         private CybosStockChart _cybosChart;
         private CybosRealtimeReceiver _cybosRealtime;
@@ -80,7 +81,7 @@ namespace Server32
                 OnLog?.Invoke("[Cybos] 차트/실시간/주문 모듈 초기화 완료");
             }
 
-            // ★ 2단계: 키움 초기화 (Cybos 이후)
+            // ★ 2단계: 키움 초기화
             _kiwoom = new KiwoomConnector();
             _kiwoom.OnLog += msg => OnLog?.Invoke(msg);
             bool kiwoomInit = _kiwoom.Initialize(_mainForm);
@@ -103,6 +104,10 @@ namespace Server32
                     _kiwoomOrder = new KiwoomOrderExecutor(_kiwoom);
                     _kiwoomOrder.SetAccount(_kiwoom.GetFirstAccount());
 
+                    // OrderManager 초기화
+                    _orderManager = new OrderManager(_kiwoom, _kiwoom.GetFirstAccount());
+                    _orderManager.OnLog += msg => OnLog?.Invoke(msg);
+
                     // ★ 3단계: 계좌 조회
                     string acct = _kiwoom.GetFirstAccount();
                     OnLog?.Invoke($"[키움] 계좌 {acct} 잔고/보유/미체결 조회 시작...");
@@ -123,7 +128,10 @@ namespace Server32
                         await _kiwoomTr.ExecuteAllConditionsAsync();
                     }
 
-                    OnLog?.Invoke("[키움] 계좌 조회 + 조건검색 완료");
+                    //// ★ 5단계: 주문 테스트 (장중에만 실행)
+                    //await RunOrderTestIfMarketOpen();
+
+                    OnLog?.Invoke("[키움] 전체 초기화 완료");
                 }
             }
             else
@@ -133,10 +141,56 @@ namespace Server32
             }
         }
 
+        private async Task RunOrderTestIfMarketOpen()
+        {
+            var now = DateTime.Now;
+            bool isMarketHours = now.Hour >= 9 && (now.Hour < 15 || (now.Hour == 15 && now.Minute <= 20));
+
+            if (!_kiwoom.IsSimulation)
+            {
+                OnLog?.Invoke("[주문테스트] 실서버 — 자동 테스트 건너뜀");
+                return;
+            }
+
+            if (!isMarketHours)
+            {
+                OnLog?.Invoke($"[주문테스트] 장외시간({now:HH:mm}) — 자동 테스트 건너뜀 (장중 09:00~15:20에 실행)");
+                return;
+            }
+
+            OnLog?.Invoke("[주문테스트] 모의투자 장중 — 자동 테스트 실행");
+            await Task.Delay(2000);
+
+            var testRunner = new OrderTestRunner(_orderManager, _kiwoom, _kiwoom.GetFirstAccount());
+            testRunner.OnLog += msg => OnLog?.Invoke(msg);
+            await testRunner.RunAllTestsAsync();
+        }
+
         public void Shutdown()
         {
             _pipe.OnMessageReceived -= OnPipeMessage;
         }
+
+        // ── 주문테스트 ──
+
+        public bool IsOrderTestReady =>
+            _kiwoom != null && _kiwoom.IsConnected && _kiwoom.IsSimulation && _orderManager != null;
+
+        public async Task RunOrderTestAsync()
+        {
+            if (!IsOrderTestReady)
+            {
+                OnLog?.Invoke("[주문테스트] 준비 안됨 (키움 미접속 또는 실서버)");
+                return;
+            }
+
+            var testRunner = new OrderTestRunner(_orderManager, _kiwoom, _kiwoom.GetFirstAccount());
+            testRunner.OnLog += msg => OnLog?.Invoke(msg);
+            await testRunner.RunAllTestsAsync();
+        }
+
+
+
 
         private void PushMarketData(MarketData md)
         {
@@ -250,11 +304,32 @@ namespace Server32
                 OnLog?.Invoke("주문: " + code + " " + orderType + " P:" + price + " Q:" + qty);
 
                 OrderInfo result;
-                if (source == "cybos" && _cybosOrder != null)
+
+                // OrderManager를 통한 주문 (키움)
+                if (source != "cybos" && _orderManager != null)
+                {
+                    int kiwoomOrderType = orderType == OrderType.Buy ? 1 : 2;
+                    string hogaGb = price == 0 ? "03" : "00";
+                    var managed = await _orderManager.SubmitOrderAsync(code, kiwoomOrderType, qty, price, hogaGb);
+
+                    result = new OrderInfo(
+                        orderNo: managed.KiwoomOrderNo ?? "", origOrderNo: "", code: code,
+                        name: managed.Name, type: orderType,
+                        condition: OrderCondition.Normal,
+                        state: managed.Status == OrderStatus.Failed ? OrderState.Rejected : OrderState.Submitted,
+                        orderPrice: price, orderQty: qty,
+                        execPrice: managed.LastFilledPrice, execQty: managed.FilledQty,
+                        remainQty: managed.RemainingQty,
+                        orderTime: DateTime.Now, execTime: managed.LastFilledTime,
+                        accountNo: _kiwoom.GetFirstAccount(),
+                        message: managed.RejectReason ?? "");
+                }
+                else if (source == "cybos" && _cybosOrder != null)
+                {
                     result = _cybosOrder.SendOrder(code, orderType, price, qty);
-                else if (_kiwoomOrder != null)
-                    result = _kiwoomOrder.SendOrder(code, orderType, price, qty);
+                }
                 else
+                {
                     result = new OrderInfo(
                         orderNo: "", origOrderNo: "", code: code, name: "",
                         type: orderType, condition: OrderCondition.Normal,
@@ -263,6 +338,7 @@ namespace Server32
                         execPrice: 0, execQty: 0, remainQty: qty,
                         orderTime: DateTime.Now, execTime: DateTime.MinValue,
                         accountNo: "", message: "연결된 API 없음");
+                }
 
                 byte[] respBody = BinarySerializer.SerializeOrder(result);
                 await _pipe.SendAsync(MessageTypes.OrderResponse, seqNo, respBody);

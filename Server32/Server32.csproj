@@ -49,6 +49,8 @@
     <Reference Include="System.IO.Pipes" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Kiwoom\OrderManager.cs" />
+    <Compile Include="Kiwoom\OrderTestRunner.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="MainForm.cs">

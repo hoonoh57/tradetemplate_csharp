@@ -157,29 +157,45 @@ namespace Server32.Kiwoom
         private async Task QueryMultiStockAsync(string[] codes, string condName, int timeoutMs = 10000)
         {
             _stockSummaries.Clear();
-            _lastTrCode = "OPTKWFID";
-            _lastRqName = "복수종목조회";
 
-            string arrCode = string.Join(";", codes);
+            // 99개 단위로 분할 (키움 제한: 최대 100종목)
+            int batchSize = 99;
+            int totalBatches = (codes.Length + batchSize - 1) / batchSize;
 
-            _kwTcs = new TaskCompletionSource<bool>();
-            int ret = _connector.CommKwRqData(arrCode, false, codes.Length, 0, _lastRqName, "3010");
-            OnLog?.Invoke($"[TR] CommKwRqData({codes.Length}종목) ret={ret}");
-
-            if (ret != 0)
+            for (int batch = 0; batch < totalBatches; batch++)
             {
-                OnLog?.Invoke($"[TR] CommKwRqData 실패 (ret={ret})");
-                return;
+                int start = batch * batchSize;
+                int count = Math.Min(batchSize, codes.Length - start);
+                string[] batchCodes = new string[count];
+                Array.Copy(codes, start, batchCodes, 0, count);
+
+                _lastTrCode = "OPTKWFID";
+                _lastRqName = "복수종목조회";
+
+                string arrCode = string.Join(";", batchCodes);
+
+                _kwTcs = new TaskCompletionSource<bool>();
+                int ret = _connector.CommKwRqData(arrCode, false, batchCodes.Length, 0, _lastRqName, "3010");
+                OnLog?.Invoke($"[TR] CommKwRqData 배치{batch + 1}/{totalBatches} ({batchCodes.Length}종목) ret={ret}");
+
+                if (ret != 0)
+                {
+                    OnLog?.Invoke($"[TR] CommKwRqData 실패 (ret={ret})");
+                    continue;
+                }
+
+                var completed = await Task.WhenAny(_kwTcs.Task, Task.Delay(timeoutMs));
+                if (completed != _kwTcs.Task)
+                {
+                    OnLog?.Invoke("[TR] 복수종목조회 타임아웃");
+                    continue;
+                }
+
+                if (batch < totalBatches - 1)
+                    await Task.Delay(1000);  // 배치 간 TR 간격
             }
 
-            var completed = await Task.WhenAny(_kwTcs.Task, Task.Delay(timeoutMs));
-            if (completed != _kwTcs.Task)
-            {
-                OnLog?.Invoke("[TR] 복수종목조회 타임아웃");
-                return;
-            }
-
-            // 결과 로깅
+            // 전체 결과 로깅
             OnLog?.Invoke($"┌─────────────────────────────────────────────────────────────────────────────────────────┐");
             OnLog?.Invoke($"│ 조건: {condName} — {_stockSummaries.Count}종목");
             OnLog?.Invoke($"├──────┬────────────┬────────┬────────┬────────┬────────┬────────┬──────────┬────────────┤");
@@ -196,6 +212,7 @@ namespace Server32.Kiwoom
 
             OnLog?.Invoke($"└──────┴────────────┴────────┴────────┴────────┴────────┴────────┴──────────┴────────────┘");
         }
+
 
         // ══════════════════════════════════════════════
         //  조건검색: 전체 조건식 순차 실행
