@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.IO;
 using System.IO.Pipes;
@@ -17,13 +17,14 @@ namespace Bridge
         private readonly string _serverName;
         private readonly CancellationTokenSource _cts;
         private NamedPipeClientStream _pipe;
-        private int _seqCounter;
+        private uint _seqNo;
         private volatile bool _isConnected;
 
+        // 동기 요청-응답 매칭
         private readonly ConcurrentDictionary<uint, TaskCompletionSource<(ushort, byte[])>> _pending
             = new ConcurrentDictionary<uint, TaskCompletionSource<(ushort, byte[])>>();
 
-        /// <summary>Push 메시지 수신 이벤트</summary>
+        /// <summary>Push 메시지 수신 이벤트 (서버가 먼저 보내는 메시지)</summary>
         public event Action<ushort, uint, byte[]> OnPushReceived;
 
         /// <summary>접속 상태 변경</summary>
@@ -49,13 +50,15 @@ namespace Bridge
             await _pipe.ConnectAsync(timeoutMs).ConfigureAwait(false);
             _isConnected = true;
             OnConnectionChanged?.Invoke(true);
+
+            // 백그라운드 읽기 시작
             _ = Task.Run(() => ReadLoop(_cts.Token));
         }
 
         /// <summary>Fire-and-forget 메시지 전송</summary>
         public async Task<uint> SendAsync(ushort msgType, byte[] body = null)
         {
-            uint seq = (uint)Interlocked.Increment(ref _seqCounter);
+            uint seq = (uint)Interlocked.Increment(ref _seqNo);
             await WritePacketAsync(msgType, seq, body).ConfigureAwait(false);
             return seq;
         }
@@ -64,8 +67,8 @@ namespace Bridge
         public async Task<(ushort respType, byte[] respBody)> RequestAsync(
             ushort msgType, byte[] body = null, int timeoutMs = 10000)
         {
+            uint seq = (uint)Interlocked.Increment(ref _seqNo);
             var tcs = new TaskCompletionSource<(ushort, byte[])>();
-            uint seq = (uint)Interlocked.Increment(ref _seqCounter);
             _pending[seq] = tcs;
 
             try
@@ -139,12 +142,14 @@ namespace Bridge
                         if (bodyRead < (int)bodyLen) break;
                     }
 
+                    // 응답인지 Push인지 판별
                     if (_pending.TryRemove(seqNo, out var tcs))
                     {
                         tcs.TrySetResult((msgType, body));
                     }
                     else
                     {
+                        // Push 메시지 (서버 발신: 실시간, 체결, 잔고 등)
                         try { OnPushReceived?.Invoke(msgType, seqNo, body); }
                         catch (Exception ex) { OnError?.Invoke($"Push handler: {ex.Message}"); }
                     }
@@ -156,6 +161,8 @@ namespace Bridge
             {
                 _isConnected = false;
                 OnConnectionChanged?.Invoke(false);
+
+                // 대기 중인 모든 요청 취소
                 foreach (var kv in _pending)
                     kv.Value.TrySetCanceled();
                 _pending.Clear();

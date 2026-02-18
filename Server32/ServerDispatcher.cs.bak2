@@ -15,93 +15,67 @@ namespace Server32
     public class ServerDispatcher
     {
         private readonly PipeServer _pipe;
-        private readonly MainForm _mainForm;
+        private readonly KiwoomConnector _kiwoom;
+        private readonly KiwoomTrManager _kiwoomTr;
+        private readonly KiwoomRealtimeReceiver _kiwoomRealtime;
+        private readonly KiwoomOrderExecutor _kiwoomOrder;
+        private readonly CybosConnector _cybos;
+        private readonly CybosStockChart _cybosChart;
+        private readonly CybosRealtimeReceiver _cybosRealtime;
+        private readonly CybosOrderExecutor _cybosOrder;
+        private readonly Action<string> _log;
 
-        private KiwoomConnector _kiwoom;
-        private KiwoomTrManager _kiwoomTr;
-        private KiwoomRealtimeReceiver _kiwoomRealtime;
-        private KiwoomOrderExecutor _kiwoomOrder;
-        private CybosConnector _cybos;
-        private CybosStockChart _cybosChart;
-        private CybosRealtimeReceiver _cybosRealtime;
-        private CybosOrderExecutor _cybosOrder;
-
-        private int _msgCount;
-        private int _rtCount;
-
-        public event Action<string> OnLog;
-        public event Action<int, int> OnStatsUpdated;
-
-        public ServerDispatcher(PipeServer pipe, MainForm mainForm)
+        public ServerDispatcher(
+            PipeServer pipe,
+            KiwoomConnector kiwoom,
+            KiwoomTrManager kiwoomTr,
+            KiwoomRealtimeReceiver kiwoomRealtime,
+            KiwoomOrderExecutor kiwoomOrder,
+            CybosConnector cybos,
+            CybosStockChart cybosChart,
+            CybosRealtimeReceiver cybosRealtime,
+            CybosOrderExecutor cybosOrder,
+            Action<string> log)
         {
             _pipe = pipe;
-            _mainForm = mainForm;
+            _kiwoom = kiwoom;
+            _kiwoomTr = kiwoomTr;
+            _kiwoomRealtime = kiwoomRealtime;
+            _kiwoomOrder = kiwoomOrder;
+            _cybos = cybos;
+            _cybosChart = cybosChart;
+            _cybosRealtime = cybosRealtime;
+            _cybosOrder = cybosOrder;
+            _log = log;
+
             _pipe.OnMessageReceived += OnPipeMessage;
-        }
 
-        public async Task InitializeAsync()
-        {
-            // 키움 초기화
-            _kiwoom = new KiwoomConnector();
-            bool kiwoomOk = _kiwoom.Initialize();
-            _mainForm.UpdateKiwoomStatus(kiwoomOk);
-            OnLog?.Invoke(kiwoomOk ? "[키움] 접속 성공" : "[키움] 접속 실패");
-
-            if (kiwoomOk)
+            _kiwoomRealtime.OnMarketDataReceived += md =>
             {
-                _kiwoomTr = new KiwoomTrManager(_kiwoom);
-                _kiwoomRealtime = new KiwoomRealtimeReceiver(_kiwoom);
-                _kiwoomRealtime.Initialize();
-                _kiwoomRealtime.OnMarketDataReceived += md => PushMarketData(md);
-                _kiwoomOrder = new KiwoomOrderExecutor(_kiwoom);
-                _kiwoomOrder.SetAccount(_kiwoom.GetFirstAccount());
-            }
+                PushMarketData(md);
+            };
 
-            // Cybos 초기화
-            _cybos = new CybosConnector();
-            bool cybosOk = _cybos.IsConnected;
-            if (cybosOk) _cybos.InitTrade();
-            _mainForm.UpdateCybosStatus(cybosOk);
-
-            if (cybosOk)
+            _cybosRealtime.OnMarketDataReceived += md =>
             {
-                _cybosChart = new CybosStockChart(_cybos);
-                _cybosChart.Initialize();
-                _cybosRealtime = new CybosRealtimeReceiver(_cybos);
-                _cybosRealtime.Initialize();
-                _cybosRealtime.OnMarketDataReceived += md => PushMarketData(md);
-                _cybosOrder = new CybosOrderExecutor(_cybos);
-                _cybosOrder.Initialize();
-            }
-
-            await Task.CompletedTask;
-        }
-
-        public void Shutdown()
-        {
-            _pipe.OnMessageReceived -= OnPipeMessage;
+                PushMarketData(md);
+            };
         }
 
         private void PushMarketData(MarketData md)
         {
             try
             {
-                _rtCount++;
                 byte[] body = BinarySerializer.SerializeMarketData(md);
                 _pipe.SendAsync(MessageTypes.RealtimePush, 0, body).ConfigureAwait(false);
-                OnStatsUpdated?.Invoke(_msgCount, _rtCount);
             }
             catch (Exception ex)
             {
-                OnLog?.Invoke("Push 실패: " + ex.Message);
+                _log("Push 실패: " + ex.Message);
             }
         }
 
         private async void OnPipeMessage(ushort msgType, uint seqNo, byte[] body)
         {
-            _msgCount++;
-            OnStatsUpdated?.Invoke(_msgCount, _rtCount);
-
             try
             {
                 switch (msgType)
@@ -109,29 +83,35 @@ namespace Server32
                     case MessageTypes.LoginRequest:
                         await HandleLogin(seqNo);
                         break;
+
                     case MessageTypes.CandleBatchRequest:
                         await HandleCandleBatch(seqNo, body);
                         break;
+
                     case MessageTypes.OrderRequest:
                         await HandleOrder(seqNo, body);
                         break;
+
                     case MessageTypes.RealtimeSubscribe:
                         HandleRealtimeSubscribe(body);
                         break;
+
                     case MessageTypes.RealtimeUnsubscribe:
                         HandleRealtimeUnsubscribe(body);
                         break;
+
                     case MessageTypes.Heartbeat:
                         await _pipe.SendAsync(MessageTypes.Heartbeat, seqNo, null);
                         break;
+
                     default:
-                        OnLog?.Invoke("알 수 없는 메시지: 0x" + msgType.ToString("X4"));
+                        _log("알 수 없는 메시지: 0x" + msgType.ToString("X4"));
                         break;
                 }
             }
             catch (Exception ex)
             {
-                OnLog?.Invoke("메시지 처리 오류: " + ex.Message);
+                _log("메시지 처리 오류: " + ex.Message);
                 try
                 {
                     byte[] errBody = BinarySerializer.SerializeString(ex.Message);
@@ -143,8 +123,8 @@ namespace Server32
 
         private async Task HandleLogin(uint seqNo)
         {
-            bool kiwoomOk = _kiwoom != null && _kiwoom.IsConnected;
-            bool cybosOk = _cybos != null && _cybos.IsConnected;
+            bool kiwoomOk = _kiwoom.IsConnected;
+            bool cybosOk = _cybos.IsConnected;
 
             using (var ms = new MemoryStream(2))
             using (var bw = new BinaryWriter(ms))
@@ -153,7 +133,8 @@ namespace Server32
                 bw.Write(cybosOk);
                 await _pipe.SendAsync(MessageTypes.LoginResponse, seqNo, ms.ToArray());
             }
-            OnLog?.Invoke("로그인 상태: 키움=" + kiwoomOk + ", Cybos=" + cybosOk);
+
+            _log("로그인 상태 전송: 키움=" + kiwoomOk + ", Cybos=" + cybosOk);
         }
 
         private async Task HandleCandleBatch(uint seqNo, byte[] body)
@@ -166,17 +147,13 @@ namespace Server32
                 int interval = br.ReadInt32();
                 int count = br.ReadInt32();
 
-                OnLog?.Invoke("캔들 조회: " + code + " " + type + " " + count + "개");
+                _log("캔들 조회: " + code + " " + type + " " + count + "개");
 
-                IReadOnlyList<CandleData> candles;
-                if (_cybosChart != null)
-                    candles = _cybosChart.GetCandles(code, type, interval, count);
-                else
-                    candles = new List<CandleData>().AsReadOnly();
-
+                IReadOnlyList<CandleData> candles = _cybosChart.GetCandles(code, type, interval, count);
                 byte[] respBody = BinarySerializer.SerializeCandleBatch(candles);
                 await _pipe.SendAsync(MessageTypes.CandleBatchResponse, seqNo, respBody);
-                OnLog?.Invoke("캔들 응답: " + candles.Count + "개");
+
+                _log("캔들 응답: " + candles.Count + "개 전송");
             }
         }
 
@@ -191,14 +168,19 @@ namespace Server32
                 int qty = br.ReadInt32();
                 string source = br.ReadString();
 
-                OnLog?.Invoke("주문: " + code + " " + orderType + " P:" + price + " Q:" + qty);
+                _log("주문 요청: " + code + " " + orderType + " P:" + price + " Q:" + qty);
 
                 OrderInfo result;
-                if (source == "cybos" && _cybosOrder != null)
+                if (source == "cybos" && _cybos.IsConnected)
+                {
                     result = _cybosOrder.SendOrder(code, orderType, price, qty);
-                else if (_kiwoomOrder != null)
+                }
+                else if (_kiwoom.IsConnected)
+                {
                     result = _kiwoomOrder.SendOrder(code, orderType, price, qty);
+                }
                 else
+                {
                     result = new OrderInfo(
                         orderNo: "", origOrderNo: "", code: code, name: "",
                         type: orderType, condition: OrderCondition.Normal,
@@ -207,27 +189,40 @@ namespace Server32
                         execPrice: 0, execQty: 0, remainQty: qty,
                         orderTime: DateTime.Now, execTime: DateTime.MinValue,
                         accountNo: "", message: "연결된 API 없음");
+                }
 
                 byte[] respBody = BinarySerializer.SerializeOrder(result);
                 await _pipe.SendAsync(MessageTypes.OrderResponse, seqNo, respBody);
-                OnLog?.Invoke("주문 응답: " + result.State);
+
+                _log("주문 응답: " + result.State + " " + result.Message);
             }
         }
 
         private void HandleRealtimeSubscribe(byte[] body)
         {
             string code = BinarySerializer.DeserializeString(body);
-            OnLog?.Invoke("실시간 등록: " + code);
-            _kiwoomRealtime?.Subscribe(code);
-            _cybosRealtime?.Subscribe(code);
+            _log("실시간 등록: " + code);
+
+            if (_kiwoom.IsConnected)
+                _kiwoomRealtime.Subscribe(code);
+            if (_cybos.IsConnected)
+                _cybosRealtime.Subscribe(code);
         }
 
         private void HandleRealtimeUnsubscribe(byte[] body)
         {
             string code = BinarySerializer.DeserializeString(body);
-            OnLog?.Invoke("실시간 해제: " + code);
-            _kiwoomRealtime?.Unsubscribe(code);
-            _cybosRealtime?.Unsubscribe(code);
+            _log("실시간 해제: " + code);
+
+            if (_kiwoom.IsConnected)
+                _kiwoomRealtime.Unsubscribe(code);
+            if (_cybos.IsConnected)
+                _cybosRealtime.Unsubscribe(code);
+        }
+
+        public void Dispose()
+        {
+            _pipe.OnMessageReceived -= OnPipeMessage;
         }
     }
 }

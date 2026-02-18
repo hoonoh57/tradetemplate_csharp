@@ -59,9 +59,9 @@ namespace Server32
 
             // Cybos 초기화
             _cybos = new CybosConnector();
-            bool cybosOk = _cybos.IsConnected;
-            if (cybosOk) _cybos.InitTrade();
+            bool cybosOk = _cybos.Initialize();
             _mainForm.UpdateCybosStatus(cybosOk);
+            OnLog?.Invoke(cybosOk ? "[Cybos] 접속 성공" : "[Cybos] 접속 실패");
 
             if (cybosOk)
             {

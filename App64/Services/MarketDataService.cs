@@ -1,5 +1,7 @@
-using System;
+﻿using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.IO;
 using System.Text;
 using System.Threading.Tasks;
 using Bridge;
@@ -7,10 +9,7 @@ using Common.Models;
 
 namespace App64.Services
 {
-    /// <summary>
-    /// 실시간 시세 관리 — 구독/해제/Push 수신
-    /// </summary>
-    public sealed class MarketDataService
+    public class MarketDataService
     {
         private readonly ConnectionService _conn;
         private readonly ConcurrentDictionary<string, MarketData> _lastData
@@ -20,62 +19,47 @@ namespace App64.Services
 
         public MarketDataService(ConnectionService conn)
         {
-            _conn = conn ?? throw new ArgumentNullException(nameof(conn));
-            _conn.OnPushReceived += OnPush;
+            _conn = conn;
+            _conn.OnPushReceived += HandlePush;
+        }
+
+        private void HandlePush(ushort msgType, uint seqNo, byte[] body)
+        {
+            if (msgType == MessageTypes.RealtimePush && body != null && body.Length > 0)
+            {
+                try
+                {
+                    var md = BinarySerializer.DeserializeMarketData(body);
+                    _lastData[md.Code] = md;
+                    OnMarketDataUpdated?.Invoke(md);
+                }
+                catch { }
+            }
         }
 
         public async Task SubscribeAsync(string code)
         {
-            if (!_conn.IsConnected) return;
-            byte[] body = Encoding.UTF8.GetBytes(code);
-            await _conn.Pipe.SendAsync(MessageTypes.RealtimeSubscribe, body);
+            var body = BinarySerializer.SerializeString(code);
+            await _conn.SendAsync(MessageTypes.RealtimeSubscribe, body);
         }
 
         public async Task UnsubscribeAsync(string code)
         {
-            if (!_conn.IsConnected) return;
-            byte[] body = Encoding.UTF8.GetBytes(code);
-            await _conn.Pipe.SendAsync(MessageTypes.RealtimeUnsubscribe, body);
-            _lastData.TryRemove(code, out _);
+            var body = BinarySerializer.SerializeString(code);
+            await _conn.SendAsync(MessageTypes.RealtimeUnsubscribe, body);
         }
 
         public void UnsubscribeAll()
         {
-            // 서버에 전체 해제 요청
-            if (_conn.IsConnected)
-            {
-                try
-                {
-                    _conn.Pipe.SendAsync(MessageTypes.RealtimeUnsubscribe,
-                        Encoding.UTF8.GetBytes("ALL")).Wait(2000);
-                }
-                catch { }
-            }
             _lastData.Clear();
         }
 
-        /// <summary>마지막 수신 데이터 조회</summary>
         public MarketData GetLastData(string code)
         {
             _lastData.TryGetValue(code, out var md);
             return md;
         }
 
-        /// <summary>구독 중인 종목 수</summary>
         public int SubscribedCount => _lastData.Count;
-
-        private void OnPush(ushort msgType, uint seqNo, byte[] body)
-        {
-            if (msgType == MessageTypes.RealtimePush)
-            {
-                try
-                {
-                    var md = BinarySerializer.DeserializeMarketData(body);
-                    _lastData[md.StockCode] = md;
-                    OnMarketDataUpdated?.Invoke(md);
-                }
-                catch { }
-            }
-        }
     }
 }

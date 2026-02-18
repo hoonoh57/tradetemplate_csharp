@@ -18,27 +18,27 @@ namespace Server32.Kiwoom
 
         public void Initialize()
         {
-            if (_connector.Api != null)
+            if (_connector.Ocx != null)
             {
-                _connector.Api.OnReceiveRealData += new Action<string, string, string>(OnReceiveRealData);
+                _connector.Ocx.OnReceiveRealData += OnReceiveRealData;
             }
         }
 
         public void Subscribe(string code)
         {
-            if (_subscribedCodes.Add(code) && _connector.Api != null)
+            if (_subscribedCodes.Add(code) && _connector.Ocx != null)
             {
                 string fids = "10;11;12;13;14;15;16;17;18;25;27;28;29;30;31;32;228;311;568";
-                _connector.Api.SetRealReg("0101", code, fids,
+                _connector.Ocx.SetRealReg("0101", code, fids,
                     _subscribedCodes.Count == 1 ? "0" : "1");
             }
         }
 
         public void Unsubscribe(string code)
         {
-            if (_subscribedCodes.Remove(code) && _connector.Api != null)
+            if (_subscribedCodes.Remove(code) && _connector.Ocx != null)
             {
-                _connector.Api.SetRealRemove("0101", code);
+                _connector.Ocx.SetRealRemove("0101", code);
             }
         }
 
@@ -65,6 +65,7 @@ namespace Server32.Kiwoom
                         askQty1: GetIntField(30),
                         strengthRate: 0.0
                     );
+
                     OnMarketDataReceived?.Invoke(md);
                 }
                 catch { }
@@ -73,16 +74,33 @@ namespace Server32.Kiwoom
 
         private int GetIntField(int fid)
         {
-            string val = _connector.Api?.GetCommRealData("", fid)?.Trim();
+            string val = _connector.Ocx?.GetCommRealData("", fid)?.Trim();
             if (int.TryParse(val, out int result)) return result;
             return 0;
         }
 
         private long GetLongField(int fid)
         {
-            string val = _connector.Api?.GetCommRealData("", fid)?.Trim();
+            string val = _connector.Ocx?.GetCommRealData("", fid)?.Trim();
             if (long.TryParse(val, out long result)) return result;
             return 0;
+        }
+    }
+}
+            return int.TryParse(val, out int v) ? v : 0;
+        }
+
+        private long GetRealLong(string code, int fid)
+        {
+            string val = _conn.Api.GetCommRealData(code, fid)?.ToString().Trim() ?? "0";
+            val = val.Replace("+", "").Replace(",", "");
+            return long.TryParse(val, out long v) ? v : 0;
+        }
+
+        private float GetRealFloat(string code, int fid)
+        {
+            string val = _conn.Api.GetCommRealData(code, fid)?.ToString().Trim() ?? "0";
+            return float.TryParse(val, out float v) ? v : 0f;
         }
     }
 }

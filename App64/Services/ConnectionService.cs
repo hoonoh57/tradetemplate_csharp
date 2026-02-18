@@ -1,63 +1,75 @@
-using System;
+﻿using System;
+using System.IO;
 using System.Threading.Tasks;
 using Bridge;
 
 namespace App64.Services
 {
-    /// <summary>
-    /// Server32와의 Named Pipe 연결 관리
-    /// </summary>
-    public sealed class ConnectionService : IDisposable
+    public class ConnectionService : IDisposable
     {
-        private PipeClient _pipe;
+        private readonly PipeClient _client;
 
         public event Action<bool> OnConnectionChanged;
         public event Action<string> OnLog;
         public event Action<ushort, uint, byte[]> OnPushReceived;
 
-        public bool IsConnected => _pipe?.IsConnected ?? false;
-        public PipeClient Pipe => _pipe;
+        public bool IsConnected => _client.IsConnected;
 
-        public async Task ConnectAsync(string serverName = ".", int timeoutMs = 5000)
+        public ConnectionService()
         {
-            _pipe = new PipeClient(serverName: serverName);
-            _pipe.OnConnectionChanged += connected =>
+            _client = new PipeClient();
+            _client.OnConnectionChanged += connected =>
             {
                 OnConnectionChanged?.Invoke(connected);
-                if (!connected) OnLog?.Invoke("[PIPE] 연결 끊김");
             };
-            _pipe.OnPushReceived += (msgType, seqNo, body) =>
+            _client.OnPushReceived += (msgType, seqNo, body) =>
             {
                 OnPushReceived?.Invoke(msgType, seqNo, body);
             };
-            _pipe.OnError += err => OnLog?.Invoke($"[PIPE ERR] {err}");
-
-            await _pipe.ConnectAsync(timeoutMs);
-            OnLog?.Invoke("[PIPE] 서버 연결 성공");
+            _client.OnError += msg =>
+            {
+                OnLog?.Invoke("[오류] " + msg);
+            };
         }
 
-        public async Task<(bool kiwoom, bool cybos)> CheckLoginAsync()
+        public async Task ConnectAsync(int timeoutMs = 5000)
         {
-            var (respType, respBody) = await _pipe.RequestAsync(
-                MessageTypes.LoginRequest, null, 5000);
+            OnLog?.Invoke("서버 연결 시도...");
+            await _client.ConnectAsync(timeoutMs);
+            OnLog?.Invoke("서버 연결 성공");
+        }
 
-            if (respType == MessageTypes.LoginResponse && respBody.Length >= 2)
+        public async Task<Tuple<bool, bool>> CheckLoginAsync()
+        {
+            var resp = await _client.RequestAsync(MessageTypes.LoginRequest);
+            using (var ms = new MemoryStream(resp.respBody))
+            using (var br = new BinaryReader(ms))
             {
-                return (respBody[0] == 1, respBody[1] == 1);
+                bool kiwoom = br.ReadBoolean();
+                bool cybos = br.ReadBoolean();
+                return Tuple.Create(kiwoom, cybos);
             }
-            return (false, false);
+        }
+
+        public async Task<uint> SendAsync(ushort msgType, byte[] body = null)
+        {
+            return await _client.SendAsync(msgType, body);
+        }
+
+        public async Task<(ushort respType, byte[] respBody)> RequestAsync(
+            ushort msgType, byte[] body = null, int timeoutMs = 10000)
+        {
+            return await _client.RequestAsync(msgType, body, timeoutMs);
         }
 
         public void Disconnect()
         {
-            _pipe?.Disconnect();
-            _pipe?.Dispose();
-            _pipe = null;
+            _client.Disconnect();
         }
 
         public void Dispose()
         {
-            Disconnect();
+            _client.Dispose();
         }
     }
 }

@@ -1,86 +1,89 @@
-using System;
-using System.Collections.Concurrent;
-using Common.Interfaces;
+﻿using System;
+using System.Collections.Generic;
 using Common.Models;
 
 namespace Server32.Cybos
 {
-    /// <summary>
-    /// CybosPlus 실시간 시세 수신 — Skills §3.3 DsCbo1.StockCur 준수
-    /// </summary>
-    public sealed class CybosRealtimeReceiver : IMarketDataReceiver
+    public class CybosRealtimeReceiver
     {
-        private readonly ConcurrentDictionary<string, dynamic> _subscribers
-            = new ConcurrentDictionary<string, dynamic>();
+        private readonly CybosConnector _connector;
+        private dynamic _stockCur;
+        private readonly HashSet<string> _subscribedCodes = new HashSet<string>();
 
         public event Action<MarketData> OnMarketDataReceived;
-        public event Action<TradeResult> OnTradeResultReceived;
-        public event Action<OrderInfo> OnOrderUpdateReceived;
 
-        public void Subscribe(string code)
+        public CybosRealtimeReceiver(CybosConnector connector)
         {
-            if (_subscribers.ContainsKey(code)) return;
-
-            try
-            {
-                dynamic stockCur = Activator.CreateInstance(
-                    Type.GetTypeFromProgID("DsCbo1.StockCur"));
-                stockCur.SetInputValue(0, "A" + code);
-                stockCur.Subscribe();
-                _subscribers[code] = stockCur;
-            }
-            catch (Exception)
-            {
-                // COM 초기화 실패 시 무시
-            }
+            _connector = connector;
         }
 
-        public void Unsubscribe(string code)
-        {
-            if (_subscribers.TryRemove(code, out dynamic sub))
-            {
-                try { sub.Unsubscribe(); } catch { }
-            }
-        }
-
-        public void SubscribeAll()
-        {
-            // 전 종목 구독은 리소스 문제로 미지원
-        }
-
-        public void UnsubscribeAll()
-        {
-            foreach (var kv in _subscribers)
-            {
-                try { kv.Value.Unsubscribe(); } catch { }
-            }
-            _subscribers.Clear();
-        }
-
-        /// <summary>외부에서 Cybos Received 이벤트 발생 시 호출</summary>
-        public void ProcessStockCurData(string code, dynamic stockCur)
+        public void Initialize()
         {
             try
             {
-                var md = new MarketData(
-                    stockCode:  code,
-                    price:      (int)stockCur.GetHeaderValue(13),
-                    change:     (int)stockCur.GetHeaderValue(14),
-                    changeRate: 0f,
-                    volume:     Convert.ToInt64(stockCur.GetHeaderValue(15)),
-                    high:       0,
-                    low:        0,
-                    open:       0,
-                    tradeTime:  DateTime.Now,
-                    askPrice:   (int)stockCur.GetHeaderValue(18),
-                    bidPrice:   (int)stockCur.GetHeaderValue(19)
-                );
-                OnMarketDataReceived?.Invoke(md);
+                _stockCur = Activator.CreateInstance(Type.GetTypeFromProgID("DsCbo1.StockCur"));
             }
             catch { }
         }
 
-        /// <summary>구독 중인 종목 수</summary>
-        public int SubscribedCount => _subscribers.Count;
+        public void Subscribe(string code)
+        {
+            if (_stockCur == null || !_connector.IsConnected) return;
+            if (!_subscribedCodes.Add(code)) return;
+
+            try
+            {
+                _stockCur.SetInputValue(0, code);
+                _stockCur.Subscribe();
+            }
+            catch { }
+        }
+
+        public void Unsubscribe(string code)
+        {
+            if (_stockCur == null) return;
+            if (!_subscribedCodes.Remove(code)) return;
+
+            try
+            {
+                _stockCur.Unsubscribe();
+            }
+            catch { }
+        }
+
+        private void ProcessStockCurData()
+        {
+            try
+            {
+                string code = (string)_stockCur.GetHeaderValue(0);
+                int price = Math.Abs((int)_stockCur.GetHeaderValue(13));
+                int open = Math.Abs((int)_stockCur.GetHeaderValue(4));
+                int high = Math.Abs((int)_stockCur.GetHeaderValue(5));
+                int low = Math.Abs((int)_stockCur.GetHeaderValue(6));
+                long volume = Convert.ToInt64(_stockCur.GetHeaderValue(9));
+                long accVolume = Convert.ToInt64(_stockCur.GetHeaderValue(18));
+
+                var md = new MarketData(
+                    code: code,
+                    time: DateTime.Now,
+                    price: price,
+                    open: open,
+                    high: high,
+                    low: low,
+                    prevClose: 0,
+                    volume: volume,
+                    accVolume: accVolume,
+                    accTradingValue: 0,
+                    bidPrice1: 0,
+                    askPrice1: 0,
+                    bidQty1: 0,
+                    askQty1: 0,
+                    strengthRate: 0.0
+                );
+
+                OnMarketDataReceived?.Invoke(md);
+            }
+            catch { }
+        }
     }
 }

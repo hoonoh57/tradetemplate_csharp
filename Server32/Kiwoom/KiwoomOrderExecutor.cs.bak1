@@ -1,0 +1,74 @@
+﻿using System;
+using Common.Enums;
+using Common.Interfaces;
+using Common.Models;
+
+namespace Server32.Kiwoom
+{
+    /// <summary>
+    /// 키움 주문 실행 — Skills §2.3 SendOrder 사전 준수
+    /// </summary>
+    public sealed class KiwoomOrderExecutor : IOrderExecutor
+    {
+        private readonly KiwoomConnector _conn;
+        private string _account;
+
+        public KiwoomOrderExecutor(KiwoomConnector conn)
+        {
+            _conn = conn ?? throw new ArgumentNullException(nameof(conn));
+            _account = conn.GetFirstAccount();
+        }
+
+        public void SetAccount(string account) { _account = account; }
+
+        public void SetAccount(string account) { _account = account; }
+
+        public OrderInfo SendOrder(string code, OrderType type, OrderCondition cond, int price, int qty)
+        {
+            int orderType = type == OrderType.Buy ? 1 : 2;
+            string hogaGb = GetHogaGubun(cond);
+
+            int result = (int)_conn.Api.SendOrder(
+                "주문", "3001", _account, orderType, code, qty, price, hogaGb, "");
+
+            return new OrderInfo(
+                orderNo: "", origOrderNo: "", code: code, name: "",
+                type: type, condition: cond,
+                state: result == 0 ? OrderState.Submitted : OrderState.Rejected,
+                orderPrice: price, orderQty: qty, execPrice: 0, execQty: 0, remainQty: qty,
+                orderTime: DateTime.Now, execTime: DateTime.MinValue,
+                accountNo: _account, message: result == 0 ? "OK" : $"ERR:{result}");
+        }
+
+        public OrderInfo ModifyOrder(string orderNo, int newPrice, int newQty)
+        {
+            int result = (int)_conn.Api.SendOrder(
+                "정정", "3002", _account, 5, "", newQty, newPrice, "00", orderNo);
+
+            return new OrderInfo(
+                orderNo, "", "", "", OrderType.Buy, OrderCondition.Limit,
+                result == 0 ? OrderState.Submitted : OrderState.Rejected,
+                newPrice, newQty, 0, 0, newQty,
+                DateTime.Now, DateTime.MinValue, _account,
+                result == 0 ? "OK" : $"ERR:{result}");
+        }
+
+        public OrderInfo CancelOrder(string orderNo)
+        {
+            int result = (int)_conn.Api.SendOrder(
+                "취소", "3003", _account, 3, "", 0, 0, "00", orderNo);
+
+            return new OrderInfo(
+                orderNo, "", "", "", OrderType.Buy, OrderCondition.Limit,
+                result == 0 ? OrderState.Cancelled : OrderState.Rejected,
+                0, 0, 0, 0, 0,
+                DateTime.Now, DateTime.MinValue, _account,
+                result == 0 ? "OK" : $"ERR:{result}");
+        }
+                case OrderCondition.Limit:  return "00";
+                case OrderCondition.Best:   return "06";
+                default: return "00";
+            }
+        }
+    }
+}

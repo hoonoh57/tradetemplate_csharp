@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
@@ -9,34 +9,30 @@ namespace Bridge
 {
     /// <summary>
     /// 초고속 바이너리 직렬화 — JSON 대비 10~50배 빠름
-    /// Common.Models의 실제 프로퍼티명/생성자에 정확히 매핑
+    /// 모든 메서드는 순수 함수 (상태 없음, 불변)
     /// </summary>
     public static class BinarySerializer
     {
         // ═══════════════════════════════════════════
-        //  MarketData (실시간 시세) — readonly struct
+        //  MarketData (실시간 시세)
         // ═══════════════════════════════════════════
 
         public static byte[] SerializeMarketData(MarketData md)
         {
-            using (var ms = new MemoryStream(128))
+            using (var ms = new MemoryStream(80))
             using (var bw = new BinaryWriter(ms, Encoding.UTF8))
             {
-                bw.Write(md.Code ?? "");
-                bw.Write(md.Time.ToBinary());
+                bw.Write(md.StockCode ?? "");
                 bw.Write(md.Price);
-                bw.Write(md.Open);
+                bw.Write(md.Change);
+                bw.Write(md.ChangeRate);
+                bw.Write(md.Volume);
                 bw.Write(md.High);
                 bw.Write(md.Low);
-                bw.Write(md.PrevClose);
-                bw.Write(md.Volume);
-                bw.Write(md.AccVolume);
-                bw.Write(md.AccTradingValue);
-                bw.Write(md.BidPrice1);
-                bw.Write(md.AskPrice1);
-                bw.Write(md.BidQty1);
-                bw.Write(md.AskQty1);
-                bw.Write(md.StrengthRate);
+                bw.Write(md.Open);
+                bw.Write(md.TradeTime.ToBinary());
+                bw.Write(md.AskPrice);
+                bw.Write(md.BidPrice);
                 return ms.ToArray();
             }
         }
@@ -47,47 +43,42 @@ namespace Bridge
             using (var br = new BinaryReader(ms, Encoding.UTF8))
             {
                 return new MarketData(
-                    code: br.ReadString(),
-                    time: DateTime.FromBinary(br.ReadInt64()),
-                    price: br.ReadInt32(),
-                    open: br.ReadInt32(),
-                    high: br.ReadInt32(),
-                    low: br.ReadInt32(),
-                    prevClose: br.ReadInt32(),
-                    volume: br.ReadInt64(),
-                    accVolume: br.ReadInt64(),
-                    accTradingValue: br.ReadInt64(),
-                    bidPrice1: br.ReadInt32(),
-                    askPrice1: br.ReadInt32(),
-                    bidQty1: br.ReadInt32(),
-                    askQty1: br.ReadInt32(),
-                    strengthRate: br.ReadDouble()
+                    stockCode:  br.ReadString(),
+                    price:      br.ReadInt32(),
+                    change:     br.ReadInt32(),
+                    changeRate: br.ReadSingle(),
+                    volume:     br.ReadInt64(),
+                    high:       br.ReadInt32(),
+                    low:        br.ReadInt32(),
+                    open:       br.ReadInt32(),
+                    tradeTime:  DateTime.FromBinary(br.ReadInt64()),
+                    askPrice:   br.ReadInt32(),
+                    bidPrice:   br.ReadInt32()
                 );
             }
         }
 
         // ═══════════════════════════════════════════
-        //  CandleData 배치 — readonly struct
+        //  CandleData 배치 (차트 데이터)
         // ═══════════════════════════════════════════
 
+        /// <summary>캔들 1개당 36바이트 (DateTime 8 + OHLC 4*4 + Volume 8)</summary>
         public static byte[] SerializeCandleBatch(IReadOnlyList<CandleData> candles)
         {
-            using (var ms = new MemoryStream(4 + candles.Count * 60))
-            using (var bw = new BinaryWriter(ms, Encoding.UTF8))
+            // 4 (count) + 36 * N
+            using (var ms = new MemoryStream(4 + candles.Count * 36))
+            using (var bw = new BinaryWriter(ms))
             {
                 bw.Write(candles.Count);
                 for (int i = 0; i < candles.Count; i++)
                 {
                     var c = candles[i];
-                    bw.Write(c.Code ?? "");
                     bw.Write(c.DateTime.ToBinary());
-                    bw.Write((int)c.Type);
                     bw.Write(c.Open);
                     bw.Write(c.High);
                     bw.Write(c.Low);
                     bw.Write(c.Close);
                     bw.Write(c.Volume);
-                    bw.Write(c.TradingValue);
                 }
                 return ms.ToArray();
             }
@@ -96,52 +87,40 @@ namespace Bridge
         public static IReadOnlyList<CandleData> DeserializeCandleBatch(byte[] data)
         {
             using (var ms = new MemoryStream(data))
-            using (var br = new BinaryReader(ms, Encoding.UTF8))
+            using (var br = new BinaryReader(ms))
             {
                 int count = br.ReadInt32();
                 var list = new List<CandleData>(count);
                 for (int i = 0; i < count; i++)
                 {
                     list.Add(new CandleData(
-                        code: br.ReadString(),
-                        dateTime: DateTime.FromBinary(br.ReadInt64()),
-                        type: (CandleType)br.ReadInt32(),
-                        open: br.ReadInt32(),
-                        high: br.ReadInt32(),
-                        low: br.ReadInt32(),
-                        close: br.ReadInt32(),
-                        volume: br.ReadInt64(),
-                        tradingValue: br.ReadInt64()
-                    ));
+                        DateTime.FromBinary(br.ReadInt64()),
+                        br.ReadInt32(), br.ReadInt32(),
+                        br.ReadInt32(), br.ReadInt32(),
+                        br.ReadInt64()));
                 }
                 return list.AsReadOnly();
             }
         }
 
         // ═══════════════════════════════════════════
-        //  OrderInfo — sealed class
+        //  OrderInfo (주문 정보)
         // ═══════════════════════════════════════════
 
         public static byte[] SerializeOrder(OrderInfo o)
         {
-            using (var ms = new MemoryStream(256))
+            using (var ms = new MemoryStream(128))
             using (var bw = new BinaryWriter(ms, Encoding.UTF8))
             {
                 bw.Write(o.OrderNo ?? "");
-                bw.Write(o.OrigOrderNo ?? "");
-                bw.Write(o.Code ?? "");
-                bw.Write(o.Name ?? "");
-                bw.Write((int)o.Type);
+                bw.Write(o.StockCode ?? "");
+                bw.Write((int)o.OrderType);
                 bw.Write((int)o.Condition);
+                bw.Write(o.Price);
+                bw.Write(o.Quantity);
+                bw.Write(o.FilledQuantity);
                 bw.Write((int)o.State);
-                bw.Write(o.OrderPrice);
-                bw.Write(o.OrderQty);
-                bw.Write(o.ExecPrice);
-                bw.Write(o.ExecQty);
-                bw.Write(o.RemainQty);
                 bw.Write(o.OrderTime.ToBinary());
-                bw.Write(o.ExecTime.ToBinary());
-                bw.Write(o.AccountNo ?? "");
                 bw.Write(o.Message ?? "");
                 return ms.ToArray();
             }
@@ -153,44 +132,38 @@ namespace Bridge
             using (var br = new BinaryReader(ms, Encoding.UTF8))
             {
                 return new OrderInfo(
-                    orderNo: br.ReadString(),
-                    origOrderNo: br.ReadString(),
-                    code: br.ReadString(),
-                    name: br.ReadString(),
-                    type: (OrderType)br.ReadInt32(),
-                    condition: (OrderCondition)br.ReadInt32(),
-                    state: (OrderState)br.ReadInt32(),
-                    orderPrice: br.ReadInt32(),
-                    orderQty: br.ReadInt32(),
-                    execPrice: br.ReadInt32(),
-                    execQty: br.ReadInt32(),
-                    remainQty: br.ReadInt32(),
-                    orderTime: DateTime.FromBinary(br.ReadInt64()),
-                    execTime: DateTime.FromBinary(br.ReadInt64()),
-                    accountNo: br.ReadString(),
-                    message: br.ReadString()
+                    orderNo:        br.ReadString(),
+                    stockCode:      br.ReadString(),
+                    orderType:      (OrderType)br.ReadInt32(),
+                    condition:      (OrderCondition)br.ReadInt32(),
+                    price:          br.ReadInt32(),
+                    quantity:       br.ReadInt32(),
+                    filledQuantity: br.ReadInt32(),
+                    state:          (OrderState)br.ReadInt32(),
+                    orderTime:      DateTime.FromBinary(br.ReadInt64()),
+                    message:        br.ReadString()
                 );
             }
         }
 
         // ═══════════════════════════════════════════
-        //  TradeResult — sealed class
+        //  TradeResult (체결 정보)
         // ═══════════════════════════════════════════
 
         public static byte[] SerializeTrade(TradeResult t)
         {
-            using (var ms = new MemoryStream(128))
+            using (var ms = new MemoryStream(96))
             using (var bw = new BinaryWriter(ms, Encoding.UTF8))
             {
-                bw.Write(t.TradeNo ?? "");
                 bw.Write(t.OrderNo ?? "");
-                bw.Write(t.Code ?? "");
-                bw.Write(t.Name ?? "");
-                bw.Write((int)t.Type);
+                bw.Write(t.StockCode ?? "");
+                bw.Write((int)t.TradeType);
                 bw.Write(t.Price);
-                bw.Write(t.Qty);
-                bw.Write(t.Amount);
+                bw.Write(t.Quantity);
+                bw.Write(t.TotalAmount);
                 bw.Write(t.TradeTime.ToBinary());
+                bw.Write(t.Fee);
+                bw.Write(t.Tax);
                 return ms.ToArray();
             }
         }
@@ -201,39 +174,36 @@ namespace Bridge
             using (var br = new BinaryReader(ms, Encoding.UTF8))
             {
                 return new TradeResult(
-                    tradeNo: br.ReadString(),
-                    orderNo: br.ReadString(),
-                    code: br.ReadString(),
-                    name: br.ReadString(),
-                    type: (OrderType)br.ReadInt32(),
-                    price: br.ReadInt32(),
-                    qty: br.ReadInt32(),
-                    amount: br.ReadInt64(),
-                    tradeTime: DateTime.FromBinary(br.ReadInt64())
+                    orderNo:     br.ReadString(),
+                    stockCode:   br.ReadString(),
+                    tradeType:   (OrderType)br.ReadInt32(),
+                    price:       br.ReadInt32(),
+                    quantity:    br.ReadInt32(),
+                    totalAmount: br.ReadInt64(),
+                    tradeTime:   DateTime.FromBinary(br.ReadInt64()),
+                    fee:         br.ReadInt64(),
+                    tax:         br.ReadInt64()
                 );
             }
         }
 
         // ═══════════════════════════════════════════
-        //  BalanceInfo — sealed class
+        //  BalanceInfo (잔고 정보)
         // ═══════════════════════════════════════════
 
         public static byte[] SerializeBalance(BalanceInfo b)
         {
-            using (var ms = new MemoryStream(128))
+            using (var ms = new MemoryStream(96))
             using (var bw = new BinaryWriter(ms, Encoding.UTF8))
             {
-                bw.Write(b.Code ?? "");
-                bw.Write(b.Name ?? "");
-                bw.Write(b.Qty);
+                bw.Write(b.StockCode ?? "");
+                bw.Write(b.StockName ?? "");
+                bw.Write(b.Quantity);
                 bw.Write(b.AvgPrice);
                 bw.Write(b.CurrentPrice);
-                bw.Write(b.PurchaseAmount);
-                bw.Write(b.EvalAmount);
-                bw.Write(b.ProfitLoss);
                 bw.Write(b.ProfitRate);
-                bw.Write((int)b.Market);
-                bw.Write(b.UpdateTime.ToBinary());
+                bw.Write(b.ProfitAmount);
+                bw.Write(b.TotalBuyAmount);
                 return ms.ToArray();
             }
         }
@@ -244,45 +214,39 @@ namespace Bridge
             using (var br = new BinaryReader(ms, Encoding.UTF8))
             {
                 return new BalanceInfo(
-                    code: br.ReadString(),
-                    name: br.ReadString(),
-                    qty: br.ReadInt32(),
-                    avgPrice: br.ReadInt32(),
-                    currentPrice: br.ReadInt32(),
-                    purchaseAmount: br.ReadInt64(),
-                    evalAmount: br.ReadInt64(),
-                    profitLoss: br.ReadInt64(),
-                    profitRate: br.ReadDouble(),
-                    market: (MarketType)br.ReadInt32(),
-                    updateTime: DateTime.FromBinary(br.ReadInt64())
+                    stockCode:      br.ReadString(),
+                    stockName:      br.ReadString(),
+                    quantity:       br.ReadInt32(),
+                    avgPrice:       br.ReadInt32(),
+                    currentPrice:   br.ReadInt32(),
+                    profitRate:     br.ReadDouble(),
+                    profitAmount:   br.ReadInt64(),
+                    totalBuyAmount: br.ReadInt64()
                 );
             }
         }
 
         // ═══════════════════════════════════════════
-        //  BalanceInfo 배치
+        //  BalanceInfo 배치 (잔고 목록)
         // ═══════════════════════════════════════════
 
         public static byte[] SerializeBalanceBatch(IReadOnlyList<BalanceInfo> list)
         {
-            using (var ms = new MemoryStream(4 + list.Count * 128))
+            using (var ms = new MemoryStream(4 + list.Count * 96))
             using (var bw = new BinaryWriter(ms, Encoding.UTF8))
             {
                 bw.Write(list.Count);
                 for (int i = 0; i < list.Count; i++)
                 {
                     var b = list[i];
-                    bw.Write(b.Code ?? "");
-                    bw.Write(b.Name ?? "");
-                    bw.Write(b.Qty);
+                    bw.Write(b.StockCode ?? "");
+                    bw.Write(b.StockName ?? "");
+                    bw.Write(b.Quantity);
                     bw.Write(b.AvgPrice);
                     bw.Write(b.CurrentPrice);
-                    bw.Write(b.PurchaseAmount);
-                    bw.Write(b.EvalAmount);
-                    bw.Write(b.ProfitLoss);
                     bw.Write(b.ProfitRate);
-                    bw.Write((int)b.Market);
-                    bw.Write(b.UpdateTime.ToBinary());
+                    bw.Write(b.ProfitAmount);
+                    bw.Write(b.TotalBuyAmount);
                 }
                 return ms.ToArray();
             }
@@ -300,9 +264,7 @@ namespace Bridge
                     list.Add(new BalanceInfo(
                         br.ReadString(), br.ReadString(),
                         br.ReadInt32(), br.ReadInt32(), br.ReadInt32(),
-                        br.ReadInt64(), br.ReadInt64(), br.ReadInt64(),
-                        br.ReadDouble(), (MarketType)br.ReadInt32(),
-                        DateTime.FromBinary(br.ReadInt64())));
+                        br.ReadDouble(), br.ReadInt64(), br.ReadInt64()));
                 }
                 return list.AsReadOnly();
             }
@@ -339,24 +301,24 @@ namespace Bridge
             using (var br = new BinaryReader(ms, Encoding.UTF8))
             {
                 return new StockInfo(
-                    code: br.ReadString(),
-                    name: br.ReadString(),
-                    market: (MarketType)br.ReadInt32(),
-                    faceValue: br.ReadInt32(),
-                    listedShares: br.ReadInt64(),
-                    marketCap: br.ReadInt64(),
-                    sectorCode: br.ReadString(),
-                    sectorName: br.ReadString(),
-                    priceUnit: br.ReadInt32(),
-                    isSuspended: br.ReadBoolean(),
-                    isAdminIssue: br.ReadBoolean(),
-                    listedDate: DateTime.FromBinary(br.ReadInt64())
+                    code:          br.ReadString(),
+                    name:          br.ReadString(),
+                    market:        (MarketType)br.ReadInt32(),
+                    faceValue:     br.ReadInt32(),
+                    listedShares:  br.ReadInt64(),
+                    marketCap:     br.ReadInt64(),
+                    sectorCode:    br.ReadString(),
+                    sectorName:    br.ReadString(),
+                    priceUnit:     br.ReadInt32(),
+                    isSuspended:   br.ReadBoolean(),
+                    isAdminIssue:  br.ReadBoolean(),
+                    listedDate:    DateTime.FromBinary(br.ReadInt64())
                 );
             }
         }
 
         // ═══════════════════════════════════════════
-        //  문자열 헬퍼
+        //  단순 문자열 / 문자열 배열 헬퍼
         // ═══════════════════════════════════════════
 
         public static byte[] SerializeString(string s)

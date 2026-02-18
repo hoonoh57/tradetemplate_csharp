@@ -2,7 +2,6 @@
 using System.Drawing;
 using System.Windows.Forms;
 using App64.Services;
-using Common.Enums;
 using Common.Models;
 
 namespace App64
@@ -86,25 +85,6 @@ namespace App64
             }
         }
 
-        private async void mnuServerConnect_Click(object sender, EventArgs e)
-        {
-            try
-            {
-                await _conn.ConnectAsync();
-                AppendLog("수동 연결 성공");
-            }
-            catch (Exception ex)
-            {
-                AppendLog("수동 연결 실패: " + ex.Message);
-            }
-        }
-
-        private void mnuServerDisconnect_Click(object sender, EventArgs e)
-        {
-            _conn?.Disconnect();
-            AppendLog("연결 해제됨");
-        }
-
         public async void SubscribeRealtimeAsync(string code)
         {
             try
@@ -122,7 +102,7 @@ namespace App64
         {
             try
             {
-                var candles = await _candle.GetCandlesAsync(code, CandleType.Daily, 1, 200);
+                var candles = await _candle.GetCandlesAsync(code, Common.Enums.CandleType.Day, 1, 200);
                 AppendLog(code + " 캔들 " + candles.Count + "개 수신");
             }
             catch (Exception ex)
@@ -135,7 +115,7 @@ namespace App64
         {
             try
             {
-                var result = await _order.SendOrderAsync(code, price, qty);
+                var result = await _order.SendOrderAsync(code, Common.Enums.OrderType.Buy, price, qty);
                 AppendLog("주문 결과: " + result.Message);
             }
             catch (Exception ex)

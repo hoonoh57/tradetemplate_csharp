@@ -35,11 +35,11 @@ namespace Server32.Cybos
             try
             {
                 _chart.SetInputValue(0, code);
-                _chart.SetInputValue(1, (short)50);
+                _chart.SetInputValue(1, (int)ord: 50);
                 _chart.SetInputValue(4, count);
                 _chart.SetInputValue(5, new int[] { 0, 2, 3, 4, 5, 8, 9 });
                 _chart.SetInputValue(6, ToChartGubun(type));
-                _chart.SetInputValue(9, (short)49);
+                _chart.SetInputValue(9, (int)ord: 49);
 
                 if (type == CandleType.Minute || type == CandleType.Tick)
                     _chart.SetInputValue(7, interval);
@@ -68,12 +68,12 @@ namespace Server32.Cybos
             try
             {
                 _chart.SetInputValue(0, code);
-                _chart.SetInputValue(1, (short)49);
+                _chart.SetInputValue(1, (int)ord: 49);
                 _chart.SetInputValue(2, int.Parse(to.ToString("yyyyMMdd")));
                 _chart.SetInputValue(3, int.Parse(from.ToString("yyyyMMdd")));
                 _chart.SetInputValue(5, new int[] { 0, 2, 3, 4, 5, 8, 9 });
                 _chart.SetInputValue(6, ToChartGubun(type));
-                _chart.SetInputValue(9, (short)49);
+                _chart.SetInputValue(9, (int)ord: 49);
 
                 if (type == CandleType.Minute || type == CandleType.Tick)
                     _chart.SetInputValue(7, interval);
@@ -123,14 +123,15 @@ namespace Server32.Cybos
         {
             switch (type)
             {
-                case CandleType.Daily: return 'D';
-                case CandleType.Weekly: return 'W';
-                case CandleType.Monthly: return 'M';
+                case CandleType.Day: return 'D';
+                case CandleType.Week: return 'W';
+                case CandleType.Month: return 'M';
                 case CandleType.Minute: return 'm';
                 case CandleType.Tick: return 'T';
                 default: return 'D';
             }
         }
+
         private void WaitForLimit()
         {
             try

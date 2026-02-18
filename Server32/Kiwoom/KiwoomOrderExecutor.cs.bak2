@@ -21,8 +21,8 @@ namespace Server32.Kiwoom
 
         public OrderInfo SendOrder(string code, OrderType orderType, int price, int qty)
         {
-            if (_connector.Api == null)
-                return MakeErrorOrder(code, orderType, price, qty, "API 미초기화");
+            if (_connector.Ocx == null)
+                return MakeErrorOrder(code, orderType, price, qty, "OCX 미초기화");
 
             try
             {
@@ -35,7 +35,7 @@ namespace Server32.Kiwoom
                 }
 
                 string hoga = price > 0 ? "00" : "03";
-                int ret = _connector.Api.SendOrder("주문", "0101", _accountNo,
+                int ret = _connector.Ocx.SendOrder("주문", "0101", _accountNo,
                     orderTypeCode, code, qty, price, hoga, "");
 
                 if (ret == 0)
@@ -62,12 +62,12 @@ namespace Server32.Kiwoom
 
         public OrderInfo ModifyOrder(string origOrderNo, string code, int price, int qty)
         {
-            if (_connector.Api == null)
-                return MakeErrorOrder(code, OrderType.Buy, price, qty, "API 미초기화");
+            if (_connector.Ocx == null)
+                return MakeErrorOrder(code, OrderType.Buy, price, qty, "OCX 미초기화");
 
             try
             {
-                int ret = _connector.Api.SendOrder("정정", "0101", _accountNo,
+                int ret = _connector.Ocx.SendOrder("정정", "0101", _accountNo,
                     5, code, qty, price, "00", origOrderNo);
 
                 return new OrderInfo(
@@ -88,12 +88,12 @@ namespace Server32.Kiwoom
 
         public OrderInfo CancelOrder(string origOrderNo, string code, int qty)
         {
-            if (_connector.Api == null)
-                return MakeErrorOrder(code, OrderType.Sell, 0, qty, "API 미초기화");
+            if (_connector.Ocx == null)
+                return MakeErrorOrder(code, OrderType.Sell, 0, qty, "OCX 미초기화");
 
             try
             {
-                int ret = _connector.Api.SendOrder("취소", "0101", _accountNo,
+                int ret = _connector.Ocx.SendOrder("취소", "0101", _accountNo,
                     3, code, qty, 0, "", origOrderNo);
 
                 return new OrderInfo(

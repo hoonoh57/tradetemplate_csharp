@@ -1,113 +1,154 @@
-using System;
+﻿using System;
 using Common.Enums;
-using Common.Interfaces;
 using Common.Models;
 
 namespace Server32.Cybos
 {
-    /// <summary>
-    /// CybosPlus 주문 실행 — Skills §3.4 CpTd0311/0313/0314 준수
-    /// </summary>
-    public sealed class CybosOrderExecutor : IOrderExecutor
+    public class CybosOrderExecutor
     {
-        private readonly string _account;
-        private readonly string _goodsCode;
+        private readonly CybosConnector _connector;
+        private dynamic _cpOrder;
+        private dynamic _cpModify;
+        private dynamic _cpCancel;
+        private string _accountNo = "";
 
-        public CybosOrderExecutor(string account, string goodsCode)
+        public CybosOrderExecutor(CybosConnector connector)
         {
-            _account = account ?? throw new ArgumentNullException(nameof(account));
-            _goodsCode = goodsCode ?? "";
+            _connector = connector;
         }
 
-        public OrderInfo SendOrder(string code, OrderType type, OrderCondition cond, int price, int qty)
+        public void Initialize()
         {
             try
             {
-                dynamic order = Activator.CreateInstance(
-                    Type.GetTypeFromProgID("CpTrade.CpTd0311"));
+                _cpOrder = Activator.CreateInstance(Type.GetTypeFromProgID("CpTrade.CpTd0311"));
+                _cpModify = Activator.CreateInstance(Type.GetTypeFromProgID("CpTrade.CpTd0313"));
+                _cpCancel = Activator.CreateInstance(Type.GetTypeFromProgID("CpTrade.CpTd0314"));
+            }
+            catch { }
+        }
 
-                order.SetInputValue(0, type == OrderType.Sell ? "1" : "2");  // 매매구분
-                order.SetInputValue(1, _account);                             // 계좌번호
-                order.SetInputValue(2, _goodsCode);                           // 상품관리구분
-                order.SetInputValue(3, "A" + code);                           // 종목코드
-                order.SetInputValue(4, qty);                                  // 주문수량
-                order.SetInputValue(5, cond == OrderCondition.Market ? 0 : price); // 주문단가
-                order.SetInputValue(7, "0");                                  // 주문조건: 기본
-                order.SetInputValue(8, cond == OrderCondition.Market ? "03" : "01"); // 호가구분
+        public void SetAccount(string accountNo)
+        {
+            _accountNo = accountNo ?? "";
+        }
 
-                order.BlockRequest();
+        public OrderInfo SendOrder(string code, OrderType orderType, int price, int qty)
+        {
+            if (_cpOrder == null || !_connector.IsConnected)
+                return MakeErrorOrder(code, orderType, price, qty, "Cybos 미연결");
 
-                string orderNo = "";
-                try { orderNo = order.GetHeaderValue(8)?.ToString() ?? ""; } catch { }
+            try
+            {
+                string buySell = orderType == OrderType.Buy ? "2" : "1";
+
+                _cpOrder.SetInputValue(0, buySell);
+                _cpOrder.SetInputValue(1, _accountNo);
+                _cpOrder.SetInputValue(2, "01");
+                _cpOrder.SetInputValue(3, code);
+                _cpOrder.SetInputValue(4, qty);
+                _cpOrder.SetInputValue(5, price);
+
+                _cpOrder.BlockRequest();
+
+                bool success = (int)_cpOrder.GetDibStatus() == 0;
+                string msg = (string)_cpOrder.GetDibMsg1();
 
                 return new OrderInfo(
-                    orderNo: orderNo, stockCode: code,
-                    orderType: type, condition: cond,
-                    price: price, quantity: qty, filledQuantity: 0,
-                    state: string.IsNullOrEmpty(orderNo) ? OrderState.Rejected : OrderState.Submitted,
+                    orderNo: success ? _cpOrder.GetHeaderValue(0)?.ToString() ?? "" : "",
+                    origOrderNo: "",
+                    code: code,
+                    name: "",
+                    type: orderType,
+                    condition: OrderCondition.Normal,
+                    state: success ? OrderState.Submitted : OrderState.Rejected,
+                    orderPrice: price,
+                    orderQty: qty,
+                    execPrice: 0,
+                    execQty: 0,
+                    remainQty: qty,
                     orderTime: DateTime.Now,
-                    message: string.IsNullOrEmpty(orderNo) ? "주문 실패" : "OK");
+                    execTime: DateTime.MinValue,
+                    accountNo: _accountNo,
+                    message: msg ?? (success ? "주문 성공" : "주문 실패"));
             }
             catch (Exception ex)
             {
-                return new OrderInfo(
-                    "", code, type, cond, price, qty, 0,
-                    OrderState.Rejected, DateTime.Now, $"ERR: {ex.Message}");
+                return MakeErrorOrder(code, orderType, price, qty, ex.Message);
             }
         }
 
-        public OrderInfo ModifyOrder(string orderNo, int newPrice, int newQty)
+        public OrderInfo ModifyOrder(string origOrderNo, string code, int price, int qty)
         {
+            if (_cpModify == null) return MakeErrorOrder(code, OrderType.Buy, price, qty, "정정 객체 없음");
+
             try
             {
-                dynamic modify = Activator.CreateInstance(
-                    Type.GetTypeFromProgID("CpTrade.CpTd0313"));
+                _cpModify.SetInputValue(0, origOrderNo);
+                _cpModify.SetInputValue(1, _accountNo);
+                _cpModify.SetInputValue(2, code);
+                _cpModify.SetInputValue(3, qty);
+                _cpModify.SetInputValue(4, price);
+                _cpModify.BlockRequest();
 
-                modify.SetInputValue(1, orderNo);
-                modify.SetInputValue(2, _account);
-                modify.SetInputValue(5, newQty);
-                modify.SetInputValue(6, newPrice);
-
-                modify.BlockRequest();
+                bool success = (int)_cpModify.GetDibStatus() == 0;
+                string msg = (string)_cpModify.GetDibMsg1();
 
                 return new OrderInfo(
-                    orderNo, "", OrderType.Buy, OrderCondition.Limit,
-                    newPrice, newQty, 0,
-                    OrderState.Submitted, DateTime.Now, "OK");
+                    orderNo: "", origOrderNo: origOrderNo, code: code, name: "",
+                    type: OrderType.Buy, condition: OrderCondition.Normal,
+                    state: success ? OrderState.Submitted : OrderState.Rejected,
+                    orderPrice: price, orderQty: qty,
+                    execPrice: 0, execQty: 0, remainQty: qty,
+                    orderTime: DateTime.Now, execTime: DateTime.MinValue,
+                    accountNo: _accountNo, message: msg ?? "정정 처리");
             }
             catch (Exception ex)
             {
-                return new OrderInfo(
-                    orderNo, "", OrderType.Buy, OrderCondition.Limit,
-                    newPrice, newQty, 0,
-                    OrderState.Rejected, DateTime.Now, $"ERR: {ex.Message}");
+                return MakeErrorOrder(code, OrderType.Buy, price, qty, "정정 오류: " + ex.Message);
             }
         }
 
-        public OrderInfo CancelOrder(string orderNo)
+        public OrderInfo CancelOrder(string origOrderNo, string code, int qty)
         {
+            if (_cpCancel == null) return MakeErrorOrder(code, OrderType.Sell, 0, qty, "취소 객체 없음");
+
             try
             {
-                dynamic cancel = Activator.CreateInstance(
-                    Type.GetTypeFromProgID("CpTrade.CpTd0314"));
+                _cpCancel.SetInputValue(0, origOrderNo);
+                _cpCancel.SetInputValue(1, _accountNo);
+                _cpCancel.SetInputValue(2, code);
+                _cpCancel.SetInputValue(3, qty);
+                _cpCancel.BlockRequest();
 
-                cancel.SetInputValue(1, orderNo);
-                cancel.SetInputValue(2, _account);
-
-                cancel.BlockRequest();
+                bool success = (int)_cpCancel.GetDibStatus() == 0;
+                string msg = (string)_cpCancel.GetDibMsg1();
 
                 return new OrderInfo(
-                    orderNo, "", OrderType.Buy, OrderCondition.Limit,
-                    0, 0, 0,
-                    OrderState.Cancelled, DateTime.Now, "OK");
+                    orderNo: "", origOrderNo: origOrderNo, code: code, name: "",
+                    type: OrderType.Sell, condition: OrderCondition.Normal,
+                    state: success ? OrderState.Submitted : OrderState.Rejected,
+                    orderPrice: 0, orderQty: qty,
+                    execPrice: 0, execQty: 0, remainQty: qty,
+                    orderTime: DateTime.Now, execTime: DateTime.MinValue,
+                    accountNo: _accountNo, message: msg ?? "취소 처리");
             }
             catch (Exception ex)
             {
-                return new OrderInfo(
-                    orderNo, "", OrderType.Buy, OrderCondition.Limit,
-                    0, 0, 0,
-                    OrderState.Rejected, DateTime.Now, $"ERR: {ex.Message}");
+                return MakeErrorOrder(code, OrderType.Sell, 0, qty, "취소 오류: " + ex.Message);
             }
+        }
+
+        private OrderInfo MakeErrorOrder(string code, OrderType type, int price, int qty, string msg)
+        {
+            return new OrderInfo(
+                orderNo: "", origOrderNo: "", code: code, name: "",
+                type: type, condition: OrderCondition.Normal,
+                state: OrderState.Rejected,
+                orderPrice: price, orderQty: qty,
+                execPrice: 0, execQty: 0, remainQty: qty,
+                orderTime: DateTime.Now, execTime: DateTime.MinValue,
+                accountNo: _accountNo, message: msg);
         }
     }
 }

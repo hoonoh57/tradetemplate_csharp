@@ -123,6 +123,8 @@ namespace Server32.Cybos
         {
             switch (type)
             {
+            switch (type)
+            {
                 case CandleType.Daily: return 'D';
                 case CandleType.Weekly: return 'W';
                 case CandleType.Monthly: return 'M';
@@ -130,7 +132,7 @@ namespace Server32.Cybos
                 case CandleType.Tick: return 'T';
                 default: return 'D';
             }
-        }
+
         private void WaitForLimit()
         {
             try

@@ -1,0 +1,137 @@
+﻿using System;
+using Common.Enums;
+using Common.Interfaces;
+using Common.Models;
+
+namespace Server32.Cybos
+{
+    /// <summary>
+    /// CybosPlus 주문 실행 — Skills §3.4 CpTd0311/0313/0314 준수
+    /// </summary>
+    public sealed class CybosOrderExecutor : IOrderExecutor
+    {
+        private readonly string _account;
+        private readonly string _goodsCode;
+
+        public CybosOrderExecutor(string account, string goodsCode)
+        {
+            _account = account ?? throw new ArgumentNullException(nameof(account));
+            _goodsCode = goodsCode ?? "";
+        }
+
+        public OrderInfo SendOrder(string code, OrderType type, OrderCondition cond, int price, int qty)
+        {
+            try
+            {
+        public OrderInfo SendOrder(string code, OrderType type, OrderCondition cond, int price, int qty)
+        {
+            try
+            {
+                dynamic order = Activator.CreateInstance(
+                    Type.GetTypeFromProgID("CpTrade.CpTd0311"));
+
+                order.SetInputValue(0, type == OrderType.Sell ? "1" : "2");
+                order.SetInputValue(1, _account);
+                order.SetInputValue(2, _goodsCode);
+                order.SetInputValue(3, "A" + code);
+                order.SetInputValue(4, qty);
+                order.SetInputValue(5, cond == OrderCondition.Market ? 0 : price);
+                order.SetInputValue(7, "0");
+                order.SetInputValue(8, cond == OrderCondition.Market ? "03" : "01");
+
+                order.BlockRequest();
+
+                string orderNo = "";
+                try { orderNo = order.GetHeaderValue(8)?.ToString() ?? ""; } catch { }
+
+                return new OrderInfo(
+                    orderNo: orderNo, origOrderNo: "", code: code, name: "",
+                    type: type, condition: cond,
+                    state: string.IsNullOrEmpty(orderNo) ? OrderState.Rejected : OrderState.Submitted,
+                    orderPrice: price, orderQty: qty, execPrice: 0, execQty: 0, remainQty: qty,
+                    orderTime: DateTime.Now, execTime: DateTime.MinValue,
+                    accountNo: _account, message: string.IsNullOrEmpty(orderNo) ? "주문 실패" : "OK");
+            }
+            catch (Exception ex)
+            {
+                return new OrderInfo(
+                    "", "", code, "", type, cond, OrderState.Rejected,
+                    price, qty, 0, 0, qty,
+                    DateTime.Now, DateTime.MinValue, _account, $"ERR: {ex.Message}");
+            }
+        }
+                    "", code, type, cond, price, qty, 0,
+                    OrderState.Rejected, DateTime.Now, $"ERR: {ex.Message}");
+        public OrderInfo ModifyOrder(string orderNo, int newPrice, int newQty)
+        {
+            try
+            {
+                dynamic modify = Activator.CreateInstance(
+                    Type.GetTypeFromProgID("CpTrade.CpTd0313"));
+                modify.SetInputValue(1, orderNo);
+                modify.SetInputValue(2, _account);
+                modify.SetInputValue(5, newQty);
+                modify.SetInputValue(6, newPrice);
+                modify.BlockRequest();
+
+                return new OrderInfo(
+                    orderNo, "", "", "", OrderType.Buy, OrderCondition.Limit,
+                    OrderState.Submitted, newPrice, newQty, 0, 0, newQty,
+                    DateTime.Now, DateTime.MinValue, _account, "OK");
+            }
+            catch (Exception ex)
+            {
+                return new OrderInfo(
+                    orderNo, "", "", "", OrderType.Buy, OrderCondition.Limit,
+                    OrderState.Rejected, newPrice, newQty, 0, 0, newQty,
+                    DateTime.Now, DateTime.MinValue, _account, $"ERR: {ex.Message}");
+            }
+        }
+                return new OrderInfo(
+                    orderNo, "", OrderType.Buy, OrderCondition.Limit,
+        public OrderInfo CancelOrder(string orderNo)
+        {
+            try
+            {
+                dynamic cancel = Activator.CreateInstance(
+                    Type.GetTypeFromProgID("CpTrade.CpTd0314"));
+                cancel.SetInputValue(1, orderNo);
+                cancel.SetInputValue(2, _account);
+                cancel.BlockRequest();
+
+                return new OrderInfo(
+                    orderNo, "", "", "", OrderType.Buy, OrderCondition.Limit,
+                    OrderState.Cancelled, 0, 0, 0, 0, 0,
+                    DateTime.Now, DateTime.MinValue, _account, "OK");
+            }
+            catch (Exception ex)
+            {
+                return new OrderInfo(
+                    orderNo, "", "", "", OrderType.Buy, OrderCondition.Limit,
+                    OrderState.Rejected, 0, 0, 0, 0, 0,
+                    DateTime.Now, DateTime.MinValue, _account, $"ERR: {ex.Message}");
+            }
+        }
+                dynamic cancel = Activator.CreateInstance(
+                    Type.GetTypeFromProgID("CpTrade.CpTd0314"));
+
+                cancel.SetInputValue(1, orderNo);
+                cancel.SetInputValue(2, _account);
+
+                cancel.BlockRequest();
+
+                return new OrderInfo(
+                    orderNo, "", OrderType.Buy, OrderCondition.Limit,
+                    0, 0, 0,
+                    OrderState.Cancelled, DateTime.Now, "OK");
+            }
+            catch (Exception ex)
+            {
+                return new OrderInfo(
+                    orderNo, "", OrderType.Buy, OrderCondition.Limit,
+                    0, 0, 0,
+                    OrderState.Rejected, DateTime.Now, $"ERR: {ex.Message}");
+            }
+        }
+    }
+}
