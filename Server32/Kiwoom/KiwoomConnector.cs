@@ -75,6 +75,44 @@ namespace Server32.Kiwoom
         }
     }
 
+    // 조건검색 이벤트 인자
+    public class _DKHOpenAPIEvents_OnReceiveConditionVerEvent : EventArgs
+    {
+        public int lRet { get; }
+        public string sMsg { get; }
+        public _DKHOpenAPIEvents_OnReceiveConditionVerEvent(int ret, string msg)
+        { lRet = ret; sMsg = msg; }
+    }
+
+    public class _DKHOpenAPIEvents_OnReceiveTrConditionEvent : EventArgs
+    {
+        public string sScrNo { get; }
+        public string strCodeList { get; }
+        public string strConditionName { get; }
+        public int nIndex { get; }
+        public int nNext { get; }
+        public _DKHOpenAPIEvents_OnReceiveTrConditionEvent(
+            string scrNo, string codeList, string condName, int index, int next)
+        {
+            sScrNo = scrNo; strCodeList = codeList; strConditionName = condName;
+            nIndex = index; nNext = next;
+        }
+    }
+
+    public class _DKHOpenAPIEvents_OnReceiveRealConditionEvent : EventArgs
+    {
+        public string strCode { get; }
+        public string strType { get; }
+        public string strConditionName { get; }
+        public string strConditionIndex { get; }
+        public _DKHOpenAPIEvents_OnReceiveRealConditionEvent(
+            string code, string type, string condName, string condIndex)
+        {
+            strCode = code; strType = type; strConditionName = condName;
+            strConditionIndex = condIndex;
+        }
+    }
+
     // ══════════════════════════════════════════════
     //  AxKHOpenAPI — AxHost 파생 ActiveX 래퍼
     // ══════════════════════════════════════════════
@@ -87,7 +125,6 @@ namespace Server32.Kiwoom
 
         public static event Action<string> DiagLog;
 
-        // KHOpenAPI.KHOpenAPICtrl.1 의 CLSID
         public AxKHOpenAPI() : base("A1574A0D-6BFA-4BD7-9020-DED88711818D") { }
 
         protected override void AttachInterfaces()
@@ -98,7 +135,6 @@ namespace Server32.Kiwoom
 
         protected override void CreateSink()
         {
-            // 방법 1: ConnectionPointCookie (정식)
             try
             {
                 _sink = new KHOpenAPIEventSink(this);
@@ -112,7 +148,6 @@ namespace Server32.Kiwoom
                 _sinkConnected = false;
                 DiagLog?.Invoke("[AxKH] CreateSink 실패: " + ex.GetType().Name + " — " + ex.Message);
 
-                // 방법 2: dynamic 이벤트 바인딩 시도
                 try
                 {
                     _ocx.OnEventConnect += new Action<int>(Dynamic_OnEventConnect);
@@ -120,8 +155,11 @@ namespace Server32.Kiwoom
                     _ocx.OnReceiveRealData += new Action<string, string, string>(Dynamic_OnReceiveRealData);
                     _ocx.OnReceiveMsg += new Action<string, string, string, string>(Dynamic_OnReceiveMsg);
                     _ocx.OnReceiveChejanData += new Action<string, int, string>(Dynamic_OnReceiveChejanData);
+                    _ocx.OnReceiveConditionVer += new Action<int, string>(Dynamic_OnReceiveConditionVer);
+                    _ocx.OnReceiveTrCondition += new Action<string, string, string, int, int>(Dynamic_OnReceiveTrCondition);
+                    _ocx.OnReceiveRealCondition += new Action<string, string, string, string>(Dynamic_OnReceiveRealCondition);
                     _sinkConnected = true;
-                    DiagLog?.Invoke("[AxKH] Dynamic 이벤트 바인딩 성공");
+                    DiagLog?.Invoke("[AxKH] Dynamic 이벤트 바인딩 성공 (조건검색 포함)");
                 }
                 catch (Exception ex2)
                 {
@@ -132,30 +170,29 @@ namespace Server32.Kiwoom
 
         // dynamic 이벤트 핸들러
         private void Dynamic_OnEventConnect(int nErrCode)
-        {
-            RaiseOnEventConnect(nErrCode);
-        }
+            => RaiseOnEventConnect(nErrCode);
 
         private void Dynamic_OnReceiveTrData(string scrNo, string rqName, string trCode,
             string recordName, string prevNext, int dataLen, string errCode, string msg, string splmMsg)
-        {
-            RaiseOnReceiveTrData(scrNo, rqName, trCode, recordName, prevNext, dataLen, errCode, msg, splmMsg);
-        }
+            => RaiseOnReceiveTrData(scrNo, rqName, trCode, recordName, prevNext, dataLen, errCode, msg, splmMsg);
 
         private void Dynamic_OnReceiveRealData(string realKey, string realType, string realData)
-        {
-            RaiseOnReceiveRealData(realKey, realType, realData);
-        }
+            => RaiseOnReceiveRealData(realKey, realType, realData);
 
         private void Dynamic_OnReceiveMsg(string scrNo, string rqName, string trCode, string msg)
-        {
-            RaiseOnReceiveMsg(scrNo, rqName, trCode, msg);
-        }
+            => RaiseOnReceiveMsg(scrNo, rqName, trCode, msg);
 
         private void Dynamic_OnReceiveChejanData(string gubun, int itemCnt, string fidList)
-        {
-            RaiseOnReceiveChejanData(gubun, itemCnt, fidList);
-        }
+            => RaiseOnReceiveChejanData(gubun, itemCnt, fidList);
+
+        private void Dynamic_OnReceiveConditionVer(int lRet, string sMsg)
+            => RaiseOnReceiveConditionVer(lRet, sMsg);
+
+        private void Dynamic_OnReceiveTrCondition(string scrNo, string codeList, string condName, int index, int next)
+            => RaiseOnReceiveTrCondition(scrNo, codeList, condName, index, next);
+
+        private void Dynamic_OnReceiveRealCondition(string code, string type, string condName, string condIndex)
+            => RaiseOnReceiveRealCondition(code, type, condName, condIndex);
 
         protected override void DetachSink()
         {
@@ -177,6 +214,9 @@ namespace Server32.Kiwoom
         public event EventHandler<_DKHOpenAPIEvents_OnReceiveRealDataEvent> OnReceiveRealData;
         public event EventHandler<_DKHOpenAPIEvents_OnReceiveChejanDataEvent> OnReceiveChejanData;
         public event EventHandler<_DKHOpenAPIEvents_OnReceiveMsgEvent> OnReceiveMsg;
+        public event EventHandler<_DKHOpenAPIEvents_OnReceiveConditionVerEvent> OnReceiveConditionVer;
+        public event EventHandler<_DKHOpenAPIEvents_OnReceiveTrConditionEvent> OnReceiveTrCondition;
+        public event EventHandler<_DKHOpenAPIEvents_OnReceiveRealConditionEvent> OnReceiveRealCondition;
 
         internal void RaiseOnEventConnect(int errCode)
         {
@@ -211,83 +251,88 @@ namespace Server32.Kiwoom
                 scrNo, rqName, trCode, msg));
         }
 
+        internal void RaiseOnReceiveConditionVer(int lRet, string sMsg)
+        {
+            DiagLog?.Invoke($"[AxKH] ★ RaiseOnReceiveConditionVer ret={lRet} msg=\"{sMsg}\"");
+            OnReceiveConditionVer?.Invoke(this, new _DKHOpenAPIEvents_OnReceiveConditionVerEvent(lRet, sMsg));
+        }
+
+        internal void RaiseOnReceiveTrCondition(string scrNo, string codeList, string condName, int index, int next)
+        {
+            DiagLog?.Invoke($"[AxKH] ★ RaiseOnReceiveTrCondition cond=\"{condName}\" codes={codeList?.Length ?? 0}자");
+            OnReceiveTrCondition?.Invoke(this, new _DKHOpenAPIEvents_OnReceiveTrConditionEvent(
+                scrNo, codeList, condName, index, next));
+        }
+
+        internal void RaiseOnReceiveRealCondition(string code, string type, string condName, string condIndex)
+        {
+            DiagLog?.Invoke($"[AxKH] ★ RaiseOnReceiveRealCondition code={code} type={type} cond=\"{condName}\"");
+            OnReceiveRealCondition?.Invoke(this, new _DKHOpenAPIEvents_OnReceiveRealConditionEvent(
+                code, type, condName, condIndex));
+        }
+
         // ── OCX 메서드 래퍼 ──
 
-        public int CommConnect()
-        {
-            return (int)_ocx.CommConnect();
-        }
-
-        public int GetConnectState()
-        {
-            return (int)_ocx.GetConnectState();
-        }
-
-        public string GetLoginInfo(string tag)
-        {
-            return _ocx.GetLoginInfo(tag)?.ToString() ?? "";
-        }
-
-        public void SetInputValue(string id, string value)
-        {
-            _ocx.SetInputValue(id, value);
-        }
+        public int CommConnect() => (int)_ocx.CommConnect();
+        public int GetConnectState() => (int)_ocx.GetConnectState();
+        public string GetLoginInfo(string tag) => _ocx.GetLoginInfo(tag)?.ToString() ?? "";
+        public void SetInputValue(string id, string value) => _ocx.SetInputValue(id, value);
 
         public int CommRqData(string rqName, string trCode, int prevNext, string screenNo)
-        {
-            return (int)_ocx.CommRqData(rqName, trCode, prevNext, screenNo);
-        }
+            => (int)_ocx.CommRqData(rqName, trCode, prevNext, screenNo);
 
         public string GetCommData(string trCode, string rqName, int index, string itemName)
-        {
-            return _ocx.GetCommData(trCode, rqName, index, itemName)?.ToString() ?? "";
-        }
+            => _ocx.GetCommData(trCode, rqName, index, itemName)?.ToString() ?? "";
 
         public int GetRepeatCnt(string trCode, string rqName)
-        {
-            return (int)_ocx.GetRepeatCnt(trCode, rqName);
-        }
+            => (int)_ocx.GetRepeatCnt(trCode, rqName);
 
         public string GetCommRealData(string code, int fid)
-        {
-            return _ocx.GetCommRealData(code, fid)?.ToString() ?? "";
-        }
+            => _ocx.GetCommRealData(code, fid)?.ToString() ?? "";
 
         public int SetRealReg(string screenNo, string codeList, string fidList, string optType)
-        {
-            return (int)_ocx.SetRealReg(screenNo, codeList, fidList, optType);
-        }
+            => (int)_ocx.SetRealReg(screenNo, codeList, fidList, optType);
 
         public void SetRealRemove(string screenNo, string code)
-        {
-            _ocx.SetRealRemove(screenNo, code);
-        }
+            => _ocx.SetRealRemove(screenNo, code);
 
         public int SendOrder(string rqName, string screenNo, string accNo,
             int orderType, string code, int qty, int price, string hogaGb, string orgOrderNo)
-        {
-            return (int)_ocx.SendOrder(rqName, screenNo, accNo,
-                orderType, code, qty, price, hogaGb, orgOrderNo);
-        }
+            => (int)_ocx.SendOrder(rqName, screenNo, accNo, orderType, code, qty, price, hogaGb, orgOrderNo);
 
-        public string GetChejanData(int fid)
-        {
-            return _ocx.GetChejanData(fid)?.ToString() ?? "";
-        }
+        public string GetChejanData(int fid) => _ocx.GetChejanData(fid)?.ToString() ?? "";
 
         public string GetCodeListByMarket(string marketCode)
-        {
-            return _ocx.GetCodeListByMarket(marketCode)?.ToString() ?? "";
-        }
+            => _ocx.GetCodeListByMarket(marketCode)?.ToString() ?? "";
 
         public string GetMasterCodeName(string code)
-        {
-            return _ocx.GetMasterCodeName(code)?.ToString() ?? "";
-        }
-    }
+            => _ocx.GetMasterCodeName(code)?.ToString() ?? "";
+
+        // ── 조건검색 OCX 메서드 ──
+
+        public int GetConditionLoad()
+            => (int)_ocx.GetConditionLoad();
+
+
+        public string GetConditionNameList()
+            => _ocx.GetConditionNameList()?.ToString() ?? "";
+
+        public int SendCondition(string screenNo, string conditionName, int conditionIndex, int nSearch)
+            => (int)_ocx.SendCondition(screenNo, conditionName, conditionIndex, nSearch);
+
+        public void SendConditionStop(string screenNo, string conditionName, int conditionIndex)
+            => _ocx.SendConditionStop(screenNo, conditionName, conditionIndex);
+
+        public int CommKwRqData(string arrCode, bool next, int codeCount, int typeFlag, string rqName, string screenNo)
+        => (int)_ocx.CommKwRqData(arrCode, next ? 1 : 0, codeCount, typeFlag, rqName, screenNo);
+
+    }  //<============================
+
+
+
 
     // ══════════════════════════════════════════════
-    //  COM 이벤트 싱크 — _DKHOpenAPIEvents 인터페이스 구현
+    //  COM 이벤트 싱크 (ConnectionPoint용 — 현재 실패하지만 유지)
     // ══════════════════════════════════════════════
 
     [ComImport]
@@ -295,61 +340,33 @@ namespace Server32.Kiwoom
     [InterfaceType(ComInterfaceType.InterfaceIsIDispatch)]
     public interface _DKHOpenAPIEvents
     {
-        [DispId(1)]
-        void OnEventConnect(int nErrCode);
-
+        [DispId(1)] void OnEventConnect(int nErrCode);
         [DispId(2)]
         void OnReceiveTrData(string sScrNo, string sRQName, string sTrCode,
             string sRecordName, string sPrevNext, int nDataLength,
             string sErrorCode, string sMessage, string sSplmMsg);
-
-        [DispId(3)]
-        void OnReceiveRealData(string sRealKey, string sRealType, string sRealData);
-
-        [DispId(4)]
-        void OnReceiveMsg(string sScrNo, string sRQName, string sTrCode, string sMsg);
-
-        [DispId(5)]
-        void OnReceiveChejanData(string sGubun, int nItemCnt, string sFIdList);
+        [DispId(3)] void OnReceiveRealData(string sRealKey, string sRealType, string sRealData);
+        [DispId(4)] void OnReceiveMsg(string sScrNo, string sRQName, string sTrCode, string sMsg);
+        [DispId(5)] void OnReceiveChejanData(string sGubun, int nItemCnt, string sFIdList);
     }
 
     [ClassInterface(ClassInterfaceType.None)]
     public class KHOpenAPIEventSink : _DKHOpenAPIEvents
     {
         private readonly AxKHOpenAPI _host;
+        public KHOpenAPIEventSink(AxKHOpenAPI host) { _host = host; }
 
-        public KHOpenAPIEventSink(AxKHOpenAPI host)
-        {
-            _host = host;
-        }
-
-        public void OnEventConnect(int nErrCode)
-        {
-            _host.RaiseOnEventConnect(nErrCode);
-        }
-
+        public void OnEventConnect(int nErrCode) => _host.RaiseOnEventConnect(nErrCode);
         public void OnReceiveTrData(string sScrNo, string sRQName, string sTrCode,
             string sRecordName, string sPrevNext, int nDataLength,
             string sErrorCode, string sMessage, string sSplmMsg)
-        {
-            _host.RaiseOnReceiveTrData(sScrNo, sRQName, sTrCode,
-                sRecordName, sPrevNext, nDataLength, sErrorCode, sMessage, sSplmMsg);
-        }
-
+            => _host.RaiseOnReceiveTrData(sScrNo, sRQName, sTrCode, sRecordName, sPrevNext, nDataLength, sErrorCode, sMessage, sSplmMsg);
         public void OnReceiveRealData(string sRealKey, string sRealType, string sRealData)
-        {
-            _host.RaiseOnReceiveRealData(sRealKey, sRealType, sRealData);
-        }
-
+            => _host.RaiseOnReceiveRealData(sRealKey, sRealType, sRealData);
         public void OnReceiveMsg(string sScrNo, string sRQName, string sTrCode, string sMsg)
-        {
-            _host.RaiseOnReceiveMsg(sScrNo, sRQName, sTrCode, sMsg);
-        }
-
+            => _host.RaiseOnReceiveMsg(sScrNo, sRQName, sTrCode, sMsg);
         public void OnReceiveChejanData(string sGubun, int nItemCnt, string sFIdList)
-        {
-            _host.RaiseOnReceiveChejanData(sGubun, nItemCnt, sFIdList);
-        }
+            => _host.RaiseOnReceiveChejanData(sGubun, nItemCnt, sFIdList);
     }
 
     // ══════════════════════════════════════════════
@@ -375,14 +392,15 @@ namespace Server32.Kiwoom
         public event Action<string, string, string, string> OnReceiveMsg;
         public event Action<string> OnLog;
 
-        /// <summary>
-        /// AxKHOpenAPI를 MainForm에 배치 (UI 스레드 필수)
-        /// </summary>
+        // 조건검색 이벤트
+        public event Action<int, string> OnReceiveConditionVer;
+        public event Action<string, string, string, int, int> OnReceiveTrCondition;
+        public event Action<string, string, string, string> OnReceiveRealCondition;
+
         public bool Initialize(Form hostForm)
         {
             try
             {
-                // DiagLog를 OnLog로 전달
                 AxKHOpenAPI.DiagLog += msg => OnLog?.Invoke(msg);
 
                 _api = new AxKHOpenAPI();
@@ -402,6 +420,9 @@ namespace Server32.Kiwoom
                 _api.OnReceiveRealData += Api_OnReceiveRealData;
                 _api.OnReceiveChejanData += Api_OnReceiveChejanData;
                 _api.OnReceiveMsg += Api_OnReceiveMsg;
+                _api.OnReceiveConditionVer += Api_OnReceiveConditionVer;
+                _api.OnReceiveTrCondition += Api_OnReceiveTrCondition;
+                _api.OnReceiveRealCondition += Api_OnReceiveRealCondition;
 
                 return true;
             }
@@ -412,7 +433,6 @@ namespace Server32.Kiwoom
             }
         }
 
-        /// <summary>비동기 로그인 — 이벤트 우선, 폴링 fallback</summary>
         public async Task<bool> LoginAsync(int timeoutMs = 60000)
         {
             if (_api == null) return false;
@@ -422,7 +442,6 @@ namespace Server32.Kiwoom
             OnLog?.Invoke($"[키움] CommConnect() 반환값: {ret}");
             if (ret != 0) { _connected = false; return false; }
 
-            // 1차: 이벤트 기반 대기 (3초)
             var evtCompleted = await Task.WhenAny(_loginTcs.Task, Task.Delay(3000));
             if (evtCompleted == _loginTcs.Task)
             {
@@ -432,14 +451,12 @@ namespace Server32.Kiwoom
             }
             else
             {
-                // 2차: 이벤트 미수신 시 폴링으로 전환
                 OnLog?.Invoke("[키움] 이벤트 미수신, 폴링 전환...");
                 int elapsed = 3000;
                 while (elapsed < timeoutMs)
                 {
                     await Task.Delay(500);
                     elapsed += 500;
-
                     try
                     {
                         int state = _api.GetConnectState();
@@ -450,15 +467,13 @@ namespace Server32.Kiwoom
                             break;
                         }
                     }
-                    catch { /* COM 오류 무시 */ }
+                    catch { }
                 }
             }
 
             if (_connected)
             {
-                // 로그인 직후 계좌 정보 로딩에 약간의 지연 필요
                 await Task.Delay(1000);
-
                 string accList = _api.GetLoginInfo("ACCNO") ?? "";
                 OnLog?.Invoke($"[키움] GetLoginInfo(\"ACCNO\") = \"{accList}\"");
 
@@ -470,13 +485,20 @@ namespace Server32.Kiwoom
 
                 Accounts = accList.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
                 IsSimulation = _api.GetLoginInfo("GetServerGubun") == "1";
-
                 OnLog?.Invoke($"[키움] 계좌 {Accounts.Length}개: {string.Join(", ", Accounts)} (모의={IsSimulation})");
             }
 
             OnLoginCompleted?.Invoke(_connected);
             return _connected;
         }
+
+
+        public int CommKwRqData(string arrCode, bool next, int codeCount, int typeFlag, string rqName, string screenNo)
+    => _api?.CommKwRqData(arrCode, next, codeCount, typeFlag, rqName, screenNo) ?? -1;
+
+
+
+
 
         // ── COM 이벤트 핸들러 ──
 
@@ -493,60 +515,56 @@ namespace Server32.Kiwoom
         }
 
         private void Api_OnReceiveRealData(object sender, _DKHOpenAPIEvents_OnReceiveRealDataEvent e)
-        {
-            OnReceiveRealData?.Invoke(e.sRealKey, e.sRealType, e.sRealData);
-        }
+            => OnReceiveRealData?.Invoke(e.sRealKey, e.sRealType, e.sRealData);
 
         private void Api_OnReceiveChejanData(object sender, _DKHOpenAPIEvents_OnReceiveChejanDataEvent e)
-        {
-            OnReceiveChejanData?.Invoke(e);
-        }
+            => OnReceiveChejanData?.Invoke(e);
 
         private void Api_OnReceiveMsg(object sender, _DKHOpenAPIEvents_OnReceiveMsgEvent e)
-        {
-            OnReceiveMsg?.Invoke(e.sScrNo, e.sRQName, e.sTrCode, e.sMsg);
-        }
+            => OnReceiveMsg?.Invoke(e.sScrNo, e.sRQName, e.sTrCode, e.sMsg);
+
+        private void Api_OnReceiveConditionVer(object sender, _DKHOpenAPIEvents_OnReceiveConditionVerEvent e)
+            => OnReceiveConditionVer?.Invoke(e.lRet, e.sMsg);
+
+        private void Api_OnReceiveTrCondition(object sender, _DKHOpenAPIEvents_OnReceiveTrConditionEvent e)
+            => OnReceiveTrCondition?.Invoke(e.sScrNo, e.strCodeList, e.strConditionName, e.nIndex, e.nNext);
+
+        private void Api_OnReceiveRealCondition(object sender, _DKHOpenAPIEvents_OnReceiveRealConditionEvent e)
+            => OnReceiveRealCondition?.Invoke(e.strCode, e.strType, e.strConditionName, e.strConditionIndex);
 
         // ── API 래퍼 ──
 
-        public string GetFirstAccount()
-            => Accounts.Length > 0 ? Accounts[0] : "";
-
-        public void SetInputValue(string id, string value)
-            => _api?.SetInputValue(id, value);
-
+        public string GetFirstAccount() => Accounts.Length > 0 ? Accounts[0] : "";
+        public void SetInputValue(string id, string value) => _api?.SetInputValue(id, value);
         public int CommRqData(string rqName, string trCode, int prevNext, string screenNo)
             => _api?.CommRqData(rqName, trCode, prevNext, screenNo) ?? -1;
-
         public string GetCommData(string trCode, string rqName, int index, string itemName)
             => _api?.GetCommData(trCode, rqName, index, itemName)?.Trim() ?? "";
-
         public int GetRepeatCnt(string trCode, string rqName)
             => _api?.GetRepeatCnt(trCode, rqName) ?? 0;
-
         public string GetCommRealData(string code, int fid)
             => _api?.GetCommRealData(code, fid)?.Trim() ?? "";
-
         public int SetRealReg(string screenNo, string codeList, string fidList, string optType)
             => _api?.SetRealReg(screenNo, codeList, fidList, optType) ?? -1;
-
         public void SetRealRemove(string screenNo, string code)
             => _api?.SetRealRemove(screenNo, code);
-
         public int SendOrder(string rqName, string screenNo, string accNo,
             int orderType, string code, int qty, int price, string hogaGb, string orgOrderNo)
             => _api?.SendOrder(rqName, screenNo, accNo, orderType, code, qty, price, hogaGb, orgOrderNo) ?? -1;
-
-        public string GetChejanData(int fid)
-            => _api?.GetChejanData(fid)?.Trim() ?? "";
-
+        public string GetChejanData(int fid) => _api?.GetChejanData(fid)?.Trim() ?? "";
         public string[] GetCodeListByMarket(string marketCode)
         {
             string codes = _api?.GetCodeListByMarket(marketCode) ?? "";
             return codes.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
         }
+        public string GetMasterCodeName(string code) => _api?.GetMasterCodeName(code) ?? "";
 
-        public string GetMasterCodeName(string code)
-            => _api?.GetMasterCodeName(code) ?? "";
+        // 조건검색 래퍼
+        public int GetConditionLoad() => _api?.GetConditionLoad() ?? 0;
+        public string GetConditionNameList() => _api?.GetConditionNameList() ?? "";
+        public int SendCondition(string screenNo, string conditionName, int conditionIndex, int nSearch)
+            => _api?.SendCondition(screenNo, conditionName, conditionIndex, nSearch) ?? 0;
+        public void SendConditionStop(string screenNo, string conditionName, int conditionIndex)
+            => _api?.SendConditionStop(screenNo, conditionName, conditionIndex);
     }
 }

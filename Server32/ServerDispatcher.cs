@@ -103,17 +103,27 @@ namespace Server32
                     _kiwoomOrder = new KiwoomOrderExecutor(_kiwoom);
                     _kiwoomOrder.SetAccount(_kiwoom.GetFirstAccount());
 
-                    // ★ 3단계: 계좌 조회 (로그인 성공 후 자동 실행)
+                    // ★ 3단계: 계좌 조회
                     string acct = _kiwoom.GetFirstAccount();
                     OnLog?.Invoke($"[키움] 계좌 {acct} 잔고/보유/미체결 조회 시작...");
 
-                    await Task.Delay(1000);  // TR 요청 간격
+                    await Task.Delay(1000);
                     await _kiwoomTr.QueryAccountBalanceAsync(acct);
 
-                    await Task.Delay(1000);  // TR 요청 간격 (키움 1초 제한)
+                    await Task.Delay(1000);
                     await _kiwoomTr.QueryPendingOrdersAsync(acct);
 
-                    OnLog?.Invoke("[키움] 계좌 조회 완료");
+                    // ★ 4단계: 조건검색
+                    OnLog?.Invoke("[키움] 조건검색 시작...");
+                    await Task.Delay(1000);
+                    var conditions = await _kiwoomTr.LoadConditionListAsync();
+
+                    if (conditions.Count > 0)
+                    {
+                        await _kiwoomTr.ExecuteAllConditionsAsync();
+                    }
+
+                    OnLog?.Invoke("[키움] 계좌 조회 + 조건검색 완료");
                 }
             }
             else

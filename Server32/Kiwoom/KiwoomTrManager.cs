@@ -26,13 +26,221 @@ namespace Server32.Kiwoom
         // 미체결 조회 결과
         private readonly List<PendingOrder> _pendingOrders = new List<PendingOrder>();
 
+        // 조건검색
+        private TaskCompletionSource<bool> _condLoadTcs;
+        private TaskCompletionSource<string> _condResultTcs;
+        private readonly List<ConditionInfo> _conditions = new List<ConditionInfo>();
+        private int _condScrNum = 4000;
+
+        // 복수종목조회 결과
+        private TaskCompletionSource<bool> _kwTcs;
+        private readonly List<StockSummary> _stockSummaries = new List<StockSummary>();
+
         public event Action<string> OnLog;
 
         public KiwoomTrManager(KiwoomConnector connector)
         {
             _connector = connector;
             _connector.OnReceiveTrData += OnTrDataReceived;
-            OnLog?.Invoke("[TrManager] 이벤트 핸들러 등록 완료");
+            _connector.OnReceiveConditionVer += OnConditionVerReceived;
+            _connector.OnReceiveTrCondition += OnTrConditionReceived;
+            _connector.OnReceiveRealCondition += OnRealConditionReceived;
+        }
+
+        // ══════════════════════════════════════════════
+        //  조건검색: 조건목록 로드
+        // ══════════════════════════════════════════════
+
+        public async Task<List<ConditionInfo>> LoadConditionListAsync(int timeoutMs = 10000)
+        {
+            _conditions.Clear();
+            _condLoadTcs = new TaskCompletionSource<bool>();
+
+            int ret = _connector.GetConditionLoad();
+            OnLog?.Invoke($"[조건] GetConditionLoad() 호출 (ret={ret})");
+
+            var completed = await Task.WhenAny(_condLoadTcs.Task, Task.Delay(timeoutMs));
+            if (completed != _condLoadTcs.Task)
+            {
+                OnLog?.Invoke("[조건] 조건목록 로드 타임아웃");
+                return _conditions;
+            }
+
+            string nameList = _connector.GetConditionNameList();
+            OnLog?.Invoke($"[조건] GetConditionNameList() = \"{nameList}\"");
+
+            if (!string.IsNullOrWhiteSpace(nameList))
+            {
+                string[] items = nameList.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+                foreach (string item in items)
+                {
+                    string[] parts = item.Split('^');
+                    if (parts.Length == 2 && int.TryParse(parts[0].Trim(), out int idx))
+                    {
+                        _conditions.Add(new ConditionInfo
+                        {
+                            Index = idx,
+                            Name = parts[1].Trim()
+                        });
+                    }
+                }
+            }
+
+            OnLog?.Invoke("═══════════ [조건목록] ═══════════");
+            if (_conditions.Count == 0)
+            {
+                OnLog?.Invoke("  등록된 조건식 없음 (영웅문 HTS에서 [내조건식]에 등록 필요)");
+            }
+            else
+            {
+                foreach (var c in _conditions)
+                {
+                    OnLog?.Invoke($"  [{c.Index:D2}] {c.Name}");
+                }
+            }
+            OnLog?.Invoke($"  총 {_conditions.Count}개 조건식");
+            OnLog?.Invoke("════════════════════════════════════════");
+
+            return _conditions;
+        }
+
+        // ══════════════════════════════════════════════
+        //  조건검색: 조건식 실행 + 복수종목 일괄 조회
+        // ══════════════════════════════════════════════
+
+        public async Task<List<string>> ExecuteConditionAsync(ConditionInfo condition, int timeoutMs = 10000)
+        {
+            var result = new List<string>();
+            string scrNo = (_condScrNum++).ToString();
+
+            _condResultTcs = new TaskCompletionSource<string>();
+
+            int ret = _connector.SendCondition(scrNo, condition.Name, condition.Index, 0);
+            OnLog?.Invoke($"[조건] SendCondition(\"{condition.Name}\", idx={condition.Index}) ret={ret}");
+
+            if (ret == 0)
+            {
+                OnLog?.Invoke($"[조건] \"{condition.Name}\" 조건검색 요청 실패");
+                return result;
+            }
+
+            var completed = await Task.WhenAny(_condResultTcs.Task, Task.Delay(timeoutMs));
+            if (completed != _condResultTcs.Task)
+            {
+                OnLog?.Invoke($"[조건] \"{condition.Name}\" 타임아웃");
+                return result;
+            }
+
+            string codeList = _condResultTcs.Task.Result ?? "";
+            string[] codes = codeList.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+
+            if (codes.Length == 0)
+            {
+                OnLog?.Invoke($"──────── [조건: {condition.Name}] 포착 종목 없음 ────────");
+                return result;
+            }
+
+            result.AddRange(codes);
+            OnLog?.Invoke($"[조건] \"{condition.Name}\" 포착 {codes.Length}종목 → 일괄 시세 조회...");
+
+            // CommKwRqData로 일괄 조회
+            await Task.Delay(1000);  // TR 간격
+            await QueryMultiStockAsync(codes, condition.Name);
+
+            return result;
+        }
+
+        // ══════════════════════════════════════════════
+        //  복수종목조회 (CommKwRqData / OPTKWFID)
+        // ══════════════════════════════════════════════
+
+        private async Task QueryMultiStockAsync(string[] codes, string condName, int timeoutMs = 10000)
+        {
+            _stockSummaries.Clear();
+            _lastTrCode = "OPTKWFID";
+            _lastRqName = "복수종목조회";
+
+            string arrCode = string.Join(";", codes);
+
+            _kwTcs = new TaskCompletionSource<bool>();
+            int ret = _connector.CommKwRqData(arrCode, false, codes.Length, 0, _lastRqName, "3010");
+            OnLog?.Invoke($"[TR] CommKwRqData({codes.Length}종목) ret={ret}");
+
+            if (ret != 0)
+            {
+                OnLog?.Invoke($"[TR] CommKwRqData 실패 (ret={ret})");
+                return;
+            }
+
+            var completed = await Task.WhenAny(_kwTcs.Task, Task.Delay(timeoutMs));
+            if (completed != _kwTcs.Task)
+            {
+                OnLog?.Invoke("[TR] 복수종목조회 타임아웃");
+                return;
+            }
+
+            // 결과 로깅
+            OnLog?.Invoke($"┌─────────────────────────────────────────────────────────────────────────────────────────┐");
+            OnLog?.Invoke($"│ 조건: {condName} — {_stockSummaries.Count}종목");
+            OnLog?.Invoke($"├──────┬────────────┬────────┬────────┬────────┬────────┬────────┬──────────┬────────────┤");
+            OnLog?.Invoke($"│ 코드 │   종목명   │ 현재가 │  등락률│   시가 │   고가 │   저가 │  거래량  │ 전일대비   │");
+            OnLog?.Invoke($"├──────┼────────────┼────────┼────────┼────────┼────────┼────────┼──────────┼────────────┤");
+
+            foreach (var s in _stockSummaries)
+            {
+                string sign = s.Change >= 0 ? "+" : "";
+                OnLog?.Invoke(
+                    $"│{s.Code,6}│{s.Name,-10}│{Math.Abs(s.CurPrice),8:N0}│{sign}{s.ChangeRate,6:F2}%│" +
+                    $"{Math.Abs(s.Open),8:N0}│{Math.Abs(s.High),8:N0}│{Math.Abs(s.Low),8:N0}│{s.Volume,10:N0}│{sign}{s.Change,10:N0} │");
+            }
+
+            OnLog?.Invoke($"└──────┴────────────┴────────┴────────┴────────┴────────┴────────┴──────────┴────────────┘");
+        }
+
+        // ══════════════════════════════════════════════
+        //  조건검색: 전체 조건식 순차 실행
+        // ══════════════════════════════════════════════
+
+        public async Task ExecuteAllConditionsAsync()
+        {
+            if (_conditions.Count == 0)
+            {
+                OnLog?.Invoke("[조건] 실행할 조건식 없음");
+                return;
+            }
+
+            OnLog?.Invoke($"[조건] 전체 {_conditions.Count}개 조건식 순차 실행 시작...");
+
+            foreach (var cond in _conditions)
+            {
+                await Task.Delay(1000);
+                await ExecuteConditionAsync(cond);
+            }
+
+            OnLog?.Invoke("[조건] 전체 조건식 실행 완료");
+        }
+
+        // ══════════════════════════════════════════════
+        //  조건검색 이벤트 핸들러
+        // ══════════════════════════════════════════════
+
+        private void OnConditionVerReceived(int lRet, string sMsg)
+        {
+            OnLog?.Invoke($"[조건] OnReceiveConditionVer: ret={lRet}, msg=\"{sMsg}\"");
+            _condLoadTcs?.TrySetResult(lRet == 1);
+        }
+
+        private void OnTrConditionReceived(string scrNo, string codeList, string condName, int index, int next)
+        {
+            OnLog?.Invoke($"[조건] OnReceiveTrCondition: cond=\"{condName}\" idx={index} codes={codeList?.Length ?? 0}자 next={next}");
+            _condResultTcs?.TrySetResult(codeList ?? "");
+        }
+
+        private void OnRealConditionReceived(string code, string type, string condName, string condIndex)
+        {
+            string name = _connector.GetMasterCodeName(code);
+            string action = type == "I" ? "편입" : "이탈";
+            OnLog?.Invoke($"[조건실시간] [{condName}] {code} {name} → {action}");
         }
 
         // ══════════════════════════════════════════════
@@ -73,7 +281,6 @@ namespace Server32.Kiwoom
                 return;
             }
 
-            // 결과 로깅
             OnLog?.Invoke("════════════════════════════════════════");
             OnLog?.Invoke($"  [총잔고] 매입금액: {_totalBuyAmount:N0}원");
             OnLog?.Invoke($"  [총잔고] 평가금액: {_totalEvalAmount:N0}원");
@@ -126,7 +333,6 @@ namespace Server32.Kiwoom
                 return;
             }
 
-            // 결과 로깅
             OnLog?.Invoke("═══════════ [미체결 현황] ═══════════");
             if (_pendingOrders.Count == 0)
             {
@@ -173,8 +379,15 @@ namespace Server32.Kiwoom
 
         private void OnTrDataReceived(_DKHOpenAPIEvents_OnReceiveTrDataEvent e)
         {
-            // ★ 디버그: 모든 TR 수신 로깅
             OnLog?.Invoke($"[TR수신] sTrCode=\"{e.sTrCode}\", sRQName=\"{e.sRQName}\", sScrNo=\"{e.sScrNo}\"");
+
+            // 복수종목조회 응답
+            if (e.sRQName == "복수종목조회" && e.sTrCode.Equals("OPTKWFID", StringComparison.OrdinalIgnoreCase))
+            {
+                ParseMultiStock(e);
+                _kwTcs?.TrySetResult(true);
+                return;
+            }
 
             if (e.sRQName != _lastRqName)
             {
@@ -199,9 +412,44 @@ namespace Server32.Kiwoom
             _trTcs?.TrySetResult(true);
         }
 
+        // ══════════════════════════════════════════════
+        //  복수종목조회 파싱 (OPTKWFID)
+        // ══════════════════════════════════════════════
+
+        private void ParseMultiStock(_DKHOpenAPIEvents_OnReceiveTrDataEvent e)
+        {
+            int cnt = _connector.GetRepeatCnt(e.sTrCode, e.sRQName);
+            OnLog?.Invoke($"[TR파싱] 복수종목 수: {cnt}");
+
+            for (int i = 0; i < cnt; i++)
+            {
+                string code = _connector.GetCommData(e.sTrCode, e.sRQName, i, "종목코드").Trim();
+                string name = _connector.GetCommData(e.sTrCode, e.sRQName, i, "종목명").Trim();
+                string curPrice = _connector.GetCommData(e.sTrCode, e.sRQName, i, "현재가").Trim();
+                string change = _connector.GetCommData(e.sTrCode, e.sRQName, i, "전일대비").Trim();
+                string changeRate = _connector.GetCommData(e.sTrCode, e.sRQName, i, "등락율").Trim();
+                string volume = _connector.GetCommData(e.sTrCode, e.sRQName, i, "거래량").Trim();
+                string open = _connector.GetCommData(e.sTrCode, e.sRQName, i, "시가").Trim();
+                string high = _connector.GetCommData(e.sTrCode, e.sRQName, i, "고가").Trim();
+                string low = _connector.GetCommData(e.sTrCode, e.sRQName, i, "저가").Trim();
+
+                _stockSummaries.Add(new StockSummary
+                {
+                    Code = code,
+                    Name = name,
+                    CurPrice = ParseLong(curPrice),
+                    Change = ParseLong(change),
+                    ChangeRate = ParseDouble(changeRate),
+                    Volume = ParseLong(volume),
+                    Open = ParseLong(open),
+                    High = ParseLong(high),
+                    Low = ParseLong(low)
+                });
+            }
+        }
+
         private void ParseAccountBalance(_DKHOpenAPIEvents_OnReceiveTrDataEvent e)
         {
-            // 싱글 데이터 (총잔고)
             string buyAmt = _connector.GetCommData(e.sTrCode, e.sRQName, 0, "총매입금액").Trim();
             string evalAmt = _connector.GetCommData(e.sTrCode, e.sRQName, 0, "총평가금액").Trim();
             string plAmt = _connector.GetCommData(e.sTrCode, e.sRQName, 0, "총평가손익금액").Trim();
@@ -214,11 +462,9 @@ namespace Server32.Kiwoom
             long.TryParse(plAmt, out _totalProfitLoss);
             double.TryParse(plRate, out _totalProfitRate);
 
-            // 실서버 수익률 변환 (소수점 없이 올 경우 /100)
             if (!_connector.IsSimulation && Math.Abs(_totalProfitRate) > 100)
                 _totalProfitRate /= 100.0;
 
-            // 멀티 데이터 (보유종목)
             int cnt = _connector.GetRepeatCnt(e.sTrCode, e.sRQName);
             OnLog?.Invoke($"[TR파싱] 보유종목 수: {cnt}");
 
@@ -345,5 +591,24 @@ namespace Server32.Kiwoom
         public int Qty { get; set; }
         public long Price { get; set; }
         public int RemainQty { get; set; }
+    }
+
+    public class ConditionInfo
+    {
+        public int Index { get; set; }
+        public string Name { get; set; }
+    }
+
+    public class StockSummary
+    {
+        public string Code { get; set; }
+        public string Name { get; set; }
+        public long CurPrice { get; set; }
+        public long Change { get; set; }
+        public double ChangeRate { get; set; }
+        public long Volume { get; set; }
+        public long Open { get; set; }
+        public long High { get; set; }
+        public long Low { get; set; }
     }
 }
