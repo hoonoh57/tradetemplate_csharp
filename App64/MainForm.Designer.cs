@@ -27,6 +27,7 @@ namespace App64
         private System.Windows.Forms.TabPage tabLog;
         private System.Windows.Forms.ListView lvWatchList;
         private System.Windows.Forms.TextBox txtLog;
+        private System.Windows.Forms.Button btnOrderTest;
 
         protected override void Dispose(bool disposing)
         {
@@ -61,6 +62,7 @@ namespace App64
             this.tabLog = new System.Windows.Forms.TabPage();
             this.lvWatchList = new System.Windows.Forms.ListView();
             this.txtLog = new System.Windows.Forms.TextBox();
+            this.btnOrderTest = new System.Windows.Forms.Button();
             this.menuStrip.SuspendLayout();
             this.statusStrip.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.splitMain)).BeginInit();
@@ -81,12 +83,16 @@ namespace App64
             this.mnuFile.Text = "파일(&F)";
             this.mnuFile.DropDownItems.Add(this.mnuFileExit);
             this.mnuFileExit.Text = "종료(&X)";
-            this.mnuFileExit.Click += (s, e) => this.Close();
+            //this.mnuFileExit.Click += (s, e) => this.Close();
+            this.mnuFileExit.Click += new System.EventHandler(this.mnuFileExit_Click);
             // mnuView
             this.mnuView.Text = "보기(&V)";
             this.mnuView.DropDownItems.Add(this.mnuViewLog);
             this.mnuViewLog.Text = "로그 탭(&L)";
-            this.mnuViewLog.Click += (s, e) => this.tabRight.SelectedTab = this.tabLog;
+
+            //this.mnuViewLog.Click += (s, e) => this.tabRight.SelectedTab = this.tabLog;
+            this.mnuViewLog.Click += new System.EventHandler(this.mnuViewLog_Click);
+
             // mnuServer
             this.mnuServer.Text = "서버(&S)";
             this.mnuServer.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
@@ -156,8 +162,24 @@ namespace App64
             // tabLog
             this.tabLog.Text = "로그";
             this.tabLog.BackColor = System.Drawing.Color.FromArgb(20, 20, 30);
-            this.tabLog.Controls.Add(this.txtLog);
-            // txtLog
+            // btnOrderTest
+            this.btnOrderTest.Text = "주문 극한테스트";
+            this.btnOrderTest.Size = new System.Drawing.Size(130, 32);
+            this.btnOrderTest.Location = new System.Drawing.Point(3, 3);
+            this.btnOrderTest.BackColor = System.Drawing.Color.FromArgb(40, 60, 120);
+            this.btnOrderTest.ForeColor = System.Drawing.Color.White;
+            this.btnOrderTest.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnOrderTest.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(80, 120, 200);
+            this.btnOrderTest.Font = new System.Drawing.Font("맑은 고딕", 9F, System.Drawing.FontStyle.Bold);
+            this.btnOrderTest.Enabled = false;
+            this.btnOrderTest.Click += new System.EventHandler(this.btnOrderTest_Click);
+            // tabLog에 버튼과 txtLog 배치
+            this.tabLog.Controls.Clear();
+            var pnlLogTop = new System.Windows.Forms.Panel();
+            pnlLogTop.Dock = System.Windows.Forms.DockStyle.Top;
+            pnlLogTop.Height = 38;
+            pnlLogTop.BackColor = System.Drawing.Color.FromArgb(25, 25, 38);
+            pnlLogTop.Controls.Add(this.btnOrderTest);
             this.txtLog.Dock = System.Windows.Forms.DockStyle.Fill;
             this.txtLog.BackColor = System.Drawing.Color.FromArgb(20, 20, 30);
             this.txtLog.ForeColor = System.Drawing.Color.FromArgb(160, 230, 160);
@@ -167,6 +189,8 @@ namespace App64
             this.txtLog.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
             this.txtLog.BorderStyle = System.Windows.Forms.BorderStyle.None;
             this.txtLog.WordWrap = false;
+            this.tabLog.Controls.Add(this.txtLog);
+            this.tabLog.Controls.Add(pnlLogTop);
             // MainForm
             this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 15F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;

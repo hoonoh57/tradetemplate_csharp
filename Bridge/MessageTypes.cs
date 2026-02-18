@@ -56,6 +56,10 @@ namespace Bridge
         public const ushort TradeStrengthRequest  = 0x0090;
         public const ushort TradeStrengthResponse = 0x0091;
 
+        // ── 주문 극한테스트 ──
+        public const ushort OrderTestRequest = 0x00A0;
+        public const ushort OrderTestResponse = 0x00A1;
+
         // ── 시스템 ──
         public const ushort Heartbeat          = 0x00F0;
         public const ushort ErrorResponse      = 0x00FF;
@@ -99,6 +103,8 @@ namespace Bridge
                 case TradeStrengthRequest:  return "StrReq";
                 case TradeStrengthResponse: return "StrResp";
                 case Heartbeat:           return "Heartbeat";
+                case OrderTestRequest: return "OrdTestReq";
+                case OrderTestResponse: return "OrdTestResp";
                 case ErrorResponse:       return "Error";
                 default:                  return $"Unknown(0x{msgType:X4})";
             }

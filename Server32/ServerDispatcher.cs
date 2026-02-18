@@ -234,6 +234,46 @@ namespace Server32
                     case MessageTypes.Heartbeat:
                         await _pipe.SendAsync(MessageTypes.Heartbeat, seqNo, null);
                         break;
+
+                    case MessageTypes.OrderTestRequest:
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                if (!IsOrderTestReady)
+                                {
+                                    var errBody = Encoding.UTF8.GetBytes("주문테스트 불가: 키움 미접속 또는 실서버");
+                                    await _pipe.SendAsync(MessageTypes.ErrorResponse, seqNo, errBody);
+                                    return;
+                                }
+
+                                OnLog?.Invoke("[주문테스트] App64 요청 수신 — 테스트 시작");
+
+                                var sb = new System.Text.StringBuilder();
+                                var testRunner = new OrderTestRunner(_orderManager, _kiwoom, _kiwoom.GetFirstAccount());
+                                testRunner.OnLog += line =>
+                                {
+                                    sb.AppendLine(line);
+                                    OnLog?.Invoke(line);
+                                };
+
+                                await testRunner.RunAllTestsAsync();
+
+                                var resultBody = Encoding.UTF8.GetBytes(sb.ToString());
+                                await _pipe.SendAsync(MessageTypes.OrderTestResponse, seqNo, resultBody);
+                                OnLog?.Invoke("[주문테스트] 결과 App64로 전송 완료");
+                            }
+                            catch (Exception ex)
+                            {
+                                OnLog?.Invoke($"[주문테스트 ERR] {ex.Message}");
+                                var errBody = Encoding.UTF8.GetBytes($"테스트 실행 오류: {ex.Message}");
+                                try { await _pipe.SendAsync(MessageTypes.ErrorResponse, seqNo, errBody); } catch { }
+                            }
+                        });
+                        break;
+
+
+
                     default:
                         OnLog?.Invoke("알 수 없는 메시지: 0x" + msgType.ToString("X4"));
                         break;
