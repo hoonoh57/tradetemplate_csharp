@@ -316,7 +316,6 @@ namespace Server32.Kiwoom
         public event Action<_DKHOpenAPIEvents_OnReceiveTrDataEvent> OnReceiveTrData;
         public event Action<_DKHOpenAPIEvents_OnReceiveChejanDataEvent> OnReceiveChejanData;
         public event Action<string, string, string, string> OnReceiveMsg;
-        public event Action<string> OnLog;
 
         /// <summary>
         /// AxKHOpenAPI를 MainForm에 배치 (UI 스레드 필수)
@@ -356,7 +355,6 @@ namespace Server32.Kiwoom
 
             _loginTcs = new TaskCompletionSource<int>();
             int ret = _api.CommConnect();
-            OnLog?.Invoke($"[키움] CommConnect() 반환값: {ret}");
             if (ret != 0) { _connected = false; return false; }
 
             // 1차: 이벤트 기반 대기 (3초)
@@ -365,12 +363,10 @@ namespace Server32.Kiwoom
             {
                 int errCode = _loginTcs.Task.Result;
                 _connected = (errCode == 0);
-                OnLog?.Invoke($"[키움] 이벤트 수신: errCode={errCode}, connected={_connected}");
             }
             else
             {
                 // 2차: 이벤트 미수신 시 폴링으로 전환
-                OnLog?.Invoke("[키움] 이벤트 미수신, 폴링 전환...");
                 int elapsed = 3000;
                 while (elapsed < timeoutMs)
                 {
@@ -383,7 +379,6 @@ namespace Server32.Kiwoom
                         if (state == 1)
                         {
                             _connected = true;
-                            OnLog?.Invoke($"[키움] 폴링 성공 ({elapsed}ms)");
                             break;
                         }
                     }
@@ -393,22 +388,9 @@ namespace Server32.Kiwoom
 
             if (_connected)
             {
-                // 로그인 직후 계좌 정보 로딩에 약간의 지연 필요
-                await Task.Delay(1000);
-
-                string accList = _api.GetLoginInfo("ACCNO") ?? "";
-                OnLog?.Invoke($"[키움] GetLoginInfo(\"ACCNO\") = \"{accList}\"");
-
-                if (string.IsNullOrWhiteSpace(accList))
-                {
-                    accList = _api.GetLoginInfo("ACCLIST") ?? "";
-                    OnLog?.Invoke($"[키움] GetLoginInfo(\"ACCLIST\") fallback = \"{accList}\"");
-                }
-
+                string accList = _api.GetLoginInfo("ACCLIST") ?? "";
                 Accounts = accList.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
                 IsSimulation = _api.GetLoginInfo("GetServerGubun") == "1";
-
-                OnLog?.Invoke($"[키움] 계좌 {Accounts.Length}개: {string.Join(", ", Accounts)} (모의={IsSimulation})");
             }
 
             OnLoginCompleted?.Invoke(_connected);
@@ -419,7 +401,6 @@ namespace Server32.Kiwoom
 
         private void Api_OnEventConnect(object sender, _DKHOpenAPIEvents_OnEventConnectEvent e)
         {
-            OnLog?.Invoke($"[키움] OnEventConnect 이벤트: nErrCode={e.nErrCode}");
             _loginTcs?.TrySetResult(e.nErrCode);
         }
 
