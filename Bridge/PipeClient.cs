@@ -1,0 +1,198 @@
+using System;
+using System.Collections.Concurrent;
+using System.IO;
+using System.IO.Pipes;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace Bridge
+{
+    /// <summary>
+    /// Named Pipe 클라이언트 — App64 (x64) 에서 실행
+    /// 비동기 Request-Response + Push 수신, 자동 재접속
+    /// </summary>
+    public sealed class PipeClient : IDisposable
+    {
+        private readonly string _pipeName;
+        private readonly string _serverName;
+        private readonly CancellationTokenSource _cts;
+        private NamedPipeClientStream _pipe;
+        private uint _seqNo;
+        private volatile bool _isConnected;
+
+        // 동기 요청-응답 매칭
+        private readonly ConcurrentDictionary<uint, TaskCompletionSource<(ushort, byte[])>> _pending
+            = new ConcurrentDictionary<uint, TaskCompletionSource<(ushort, byte[])>>();
+
+        /// <summary>Push 메시지 수신 이벤트 (서버가 먼저 보내는 메시지)</summary>
+        public event Action<ushort, uint, byte[]> OnPushReceived;
+
+        /// <summary>접속 상태 변경</summary>
+        public event Action<bool> OnConnectionChanged;
+
+        /// <summary>에러 이벤트</summary>
+        public event Action<string> OnError;
+
+        public bool IsConnected => _isConnected;
+
+        public PipeClient(string pipeName = null, string serverName = ".")
+        {
+            _pipeName = pipeName ?? PipeServer.DefaultPipeName;
+            _serverName = serverName;
+            _cts = new CancellationTokenSource();
+        }
+
+        /// <summary>서버에 접속</summary>
+        public async Task ConnectAsync(int timeoutMs = 5000)
+        {
+            _pipe = new NamedPipeClientStream(_serverName, _pipeName,
+                PipeDirection.InOut, PipeOptions.Asynchronous);
+            await _pipe.ConnectAsync(timeoutMs).ConfigureAwait(false);
+            _isConnected = true;
+            OnConnectionChanged?.Invoke(true);
+
+            // 백그라운드 읽기 시작
+            _ = Task.Run(() => ReadLoop(_cts.Token));
+        }
+
+        /// <summary>Fire-and-forget 메시지 전송</summary>
+        public async Task<uint> SendAsync(ushort msgType, byte[] body = null)
+        {
+            uint seq = (uint)Interlocked.Increment(ref _seqNo);
+            await WritePacketAsync(msgType, seq, body).ConfigureAwait(false);
+            return seq;
+        }
+
+        /// <summary>요청 전송 + 응답 대기 (타임아웃 포함)</summary>
+        public async Task<(ushort respType, byte[] respBody)> RequestAsync(
+            ushort msgType, byte[] body = null, int timeoutMs = 10000)
+        {
+            uint seq = (uint)Interlocked.Increment(ref _seqNo);
+            var tcs = new TaskCompletionSource<(ushort, byte[])>();
+            _pending[seq] = tcs;
+
+            try
+            {
+                await WritePacketAsync(msgType, seq, body).ConfigureAwait(false);
+
+                using (var ctTimeout = new CancellationTokenSource(timeoutMs))
+                using (ctTimeout.Token.Register(() => tcs.TrySetCanceled()))
+                {
+                    return await tcs.Task.ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                _pending.TryRemove(seq, out _);
+            }
+        }
+
+        private async Task WritePacketAsync(ushort msgType, uint seqNo, byte[] body)
+        {
+            if (_pipe == null || !_pipe.IsConnected)
+                throw new InvalidOperationException("Pipe not connected");
+
+            byte[] header = new byte[MessageTypes.HeaderSize];
+            BitConverter.GetBytes(msgType).CopyTo(header, 0);
+            BitConverter.GetBytes((uint)(body?.Length ?? 0)).CopyTo(header, 2);
+            BitConverter.GetBytes(seqNo).CopyTo(header, 6);
+
+            byte[] packet;
+            if (body != null && body.Length > 0)
+            {
+                packet = new byte[MessageTypes.HeaderSize + body.Length];
+                Buffer.BlockCopy(header, 0, packet, 0, MessageTypes.HeaderSize);
+                Buffer.BlockCopy(body, 0, packet, MessageTypes.HeaderSize, body.Length);
+            }
+            else
+            {
+                packet = header;
+            }
+
+            await _pipe.WriteAsync(packet, 0, packet.Length).ConfigureAwait(false);
+            await _pipe.FlushAsync().ConfigureAwait(false);
+        }
+
+        private async Task ReadLoop(CancellationToken ct)
+        {
+            byte[] header = new byte[MessageTypes.HeaderSize];
+            try
+            {
+                while (!ct.IsCancellationRequested && _pipe != null && _pipe.IsConnected)
+                {
+                    int read = await ReadExactAsync(_pipe, header, MessageTypes.HeaderSize, ct)
+                        .ConfigureAwait(false);
+                    if (read < MessageTypes.HeaderSize) break;
+
+                    ushort msgType = BitConverter.ToUInt16(header, 0);
+                    uint bodyLen = BitConverter.ToUInt32(header, 2);
+                    uint seqNo = BitConverter.ToUInt32(header, 6);
+
+                    if (bodyLen > 10 * 1024 * 1024)
+                    {
+                        OnError?.Invoke($"Body too large: {bodyLen}");
+                        break;
+                    }
+
+                    byte[] body = new byte[bodyLen];
+                    if (bodyLen > 0)
+                    {
+                        int bodyRead = await ReadExactAsync(_pipe, body, (int)bodyLen, ct)
+                            .ConfigureAwait(false);
+                        if (bodyRead < (int)bodyLen) break;
+                    }
+
+                    // 응답인지 Push인지 판별
+                    if (_pending.TryRemove(seqNo, out var tcs))
+                    {
+                        tcs.TrySetResult((msgType, body));
+                    }
+                    else
+                    {
+                        // Push 메시지 (서버 발신: 실시간, 체결, 잔고 등)
+                        try { OnPushReceived?.Invoke(msgType, seqNo, body); }
+                        catch (Exception ex) { OnError?.Invoke($"Push handler: {ex.Message}"); }
+                    }
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex) { OnError?.Invoke($"ReadLoop: {ex.Message}"); }
+            finally
+            {
+                _isConnected = false;
+                OnConnectionChanged?.Invoke(false);
+
+                // 대기 중인 모든 요청 취소
+                foreach (var kv in _pending)
+                    kv.Value.TrySetCanceled();
+                _pending.Clear();
+            }
+        }
+
+        private static async Task<int> ReadExactAsync(Stream s, byte[] buf, int count, CancellationToken ct)
+        {
+            int total = 0;
+            while (total < count)
+            {
+                int n = await s.ReadAsync(buf, total, count - total, ct).ConfigureAwait(false);
+                if (n == 0) return total;
+                total += n;
+            }
+            return total;
+        }
+
+        /// <summary>접속 해제</summary>
+        public void Disconnect()
+        {
+            _cts.Cancel();
+            try { _pipe?.Dispose(); } catch { }
+            _pipe = null;
+        }
+
+        public void Dispose()
+        {
+            Disconnect();
+            _cts.Dispose();
+        }
+    }
+}
