@@ -83,6 +83,9 @@ namespace Server32.Kiwoom
     public class AxKHOpenAPI : AxHost
     {
         private dynamic _ocx;
+        private bool _sinkConnected;
+
+        public static event Action<string> DiagLog;
 
         // KHOpenAPI.KHOpenAPICtrl.1 의 CLSID
         public AxKHOpenAPI() : base("A1574A0D-6BFA-4BD7-9020-DED88711818D") { }
@@ -90,18 +93,68 @@ namespace Server32.Kiwoom
         protected override void AttachInterfaces()
         {
             _ocx = this.GetOcx();
+            DiagLog?.Invoke("[AxKH] AttachInterfaces 완료, _ocx=" + (_ocx != null));
         }
 
         protected override void CreateSink()
         {
-            // COM 이벤트 싱크 — 연결포인트 방식 사용
+            // 방법 1: ConnectionPointCookie (정식)
             try
             {
                 _sink = new KHOpenAPIEventSink(this);
-                _cookie = new System.Windows.Forms.AxHost.ConnectionPointCookie(
+                _cookie = new AxHost.ConnectionPointCookie(
                     _ocx, _sink, typeof(_DKHOpenAPIEvents));
+                _sinkConnected = true;
+                DiagLog?.Invoke("[AxKH] CreateSink 성공 (ConnectionPoint)");
             }
-            catch { /* 싱크 연결 실패 시 무시 */ }
+            catch (Exception ex)
+            {
+                _sinkConnected = false;
+                DiagLog?.Invoke("[AxKH] CreateSink 실패: " + ex.GetType().Name + " — " + ex.Message);
+
+                // 방법 2: dynamic 이벤트 바인딩 시도
+                try
+                {
+                    _ocx.OnEventConnect += new Action<int>(Dynamic_OnEventConnect);
+                    _ocx.OnReceiveTrData += new Action<string, string, string, string, string, int, string, string, string>(Dynamic_OnReceiveTrData);
+                    _ocx.OnReceiveRealData += new Action<string, string, string>(Dynamic_OnReceiveRealData);
+                    _ocx.OnReceiveMsg += new Action<string, string, string, string>(Dynamic_OnReceiveMsg);
+                    _ocx.OnReceiveChejanData += new Action<string, int, string>(Dynamic_OnReceiveChejanData);
+                    _sinkConnected = true;
+                    DiagLog?.Invoke("[AxKH] Dynamic 이벤트 바인딩 성공");
+                }
+                catch (Exception ex2)
+                {
+                    DiagLog?.Invoke("[AxKH] Dynamic 바인딩도 실패: " + ex2.Message);
+                }
+            }
+        }
+
+        // dynamic 이벤트 핸들러
+        private void Dynamic_OnEventConnect(int nErrCode)
+        {
+            RaiseOnEventConnect(nErrCode);
+        }
+
+        private void Dynamic_OnReceiveTrData(string scrNo, string rqName, string trCode,
+            string recordName, string prevNext, int dataLen, string errCode, string msg, string splmMsg)
+        {
+            RaiseOnReceiveTrData(scrNo, rqName, trCode, recordName, prevNext, dataLen, errCode, msg, splmMsg);
+        }
+
+        private void Dynamic_OnReceiveRealData(string realKey, string realType, string realData)
+        {
+            RaiseOnReceiveRealData(realKey, realType, realData);
+        }
+
+        private void Dynamic_OnReceiveMsg(string scrNo, string rqName, string trCode, string msg)
+        {
+            RaiseOnReceiveMsg(scrNo, rqName, trCode, msg);
+        }
+
+        private void Dynamic_OnReceiveChejanData(string gubun, int itemCnt, string fidList)
+        {
+            RaiseOnReceiveChejanData(gubun, itemCnt, fidList);
         }
 
         protected override void DetachSink()
@@ -116,6 +169,8 @@ namespace Server32.Kiwoom
         private KHOpenAPIEventSink _sink;
         private AxHost.ConnectionPointCookie _cookie;
 
+        public bool IsSinkConnected => _sinkConnected;
+
         // ── 이벤트 ──
         public event EventHandler<_DKHOpenAPIEvents_OnEventConnectEvent> OnEventConnect;
         public event EventHandler<_DKHOpenAPIEvents_OnReceiveTrDataEvent> OnReceiveTrData;
@@ -125,6 +180,7 @@ namespace Server32.Kiwoom
 
         internal void RaiseOnEventConnect(int errCode)
         {
+            DiagLog?.Invoke($"[AxKH] ★ RaiseOnEventConnect({errCode})");
             OnEventConnect?.Invoke(this, new _DKHOpenAPIEvents_OnEventConnectEvent(errCode));
         }
 
@@ -132,6 +188,7 @@ namespace Server32.Kiwoom
             string recordName, string prevNext, int dataLen, string errCode,
             string msg, string splmMsg)
         {
+            DiagLog?.Invoke($"[AxKH] ★ RaiseOnReceiveTrData rqName=\"{rqName}\" trCode=\"{trCode}\"");
             OnReceiveTrData?.Invoke(this, new _DKHOpenAPIEvents_OnReceiveTrDataEvent(
                 scrNo, rqName, trCode, recordName, prevNext, dataLen, errCode, msg, splmMsg));
         }
@@ -325,6 +382,9 @@ namespace Server32.Kiwoom
         {
             try
             {
+                // DiagLog를 OnLog로 전달
+                AxKHOpenAPI.DiagLog += msg => OnLog?.Invoke(msg);
+
                 _api = new AxKHOpenAPI();
                 ((System.ComponentModel.ISupportInitialize)_api).BeginInit();
                 _api.Visible = false;
@@ -333,6 +393,8 @@ namespace Server32.Kiwoom
                 _api.Location = new System.Drawing.Point(0, 0);
                 hostForm.Controls.Add(_api);
                 ((System.ComponentModel.ISupportInitialize)_api).EndInit();
+
+                OnLog?.Invoke($"[키움] AxKHOpenAPI 초기화 완료, SinkConnected={_api.IsSinkConnected}");
 
                 // 이벤트 연결
                 _api.OnEventConnect += Api_OnEventConnect;
@@ -343,8 +405,9 @@ namespace Server32.Kiwoom
 
                 return true;
             }
-            catch
+            catch (Exception ex)
             {
+                OnLog?.Invoke($"[키움] Initialize 실패: {ex.Message}");
                 return false;
             }
         }
@@ -425,6 +488,7 @@ namespace Server32.Kiwoom
 
         private void Api_OnReceiveTrData(object sender, _DKHOpenAPIEvents_OnReceiveTrDataEvent e)
         {
+            OnLog?.Invoke($"[키움] Api_OnReceiveTrData 수신: rqName=\"{e.sRQName}\" trCode=\"{e.sTrCode}\"");
             OnReceiveTrData?.Invoke(e);
         }
 

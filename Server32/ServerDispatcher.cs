@@ -82,6 +82,7 @@ namespace Server32
 
             // ★ 2단계: 키움 초기화 (Cybos 이후)
             _kiwoom = new KiwoomConnector();
+            _kiwoom.OnLog += msg => OnLog?.Invoke(msg);
             bool kiwoomInit = _kiwoom.Initialize(_mainForm);
             if (kiwoomInit)
             {
@@ -95,11 +96,24 @@ namespace Server32
                 if (kiwoomOk)
                 {
                     _kiwoomTr = new KiwoomTrManager(_kiwoom);
+                    _kiwoomTr.OnLog += msg => OnLog?.Invoke(msg);
                     _kiwoomRealtime = new KiwoomRealtimeReceiver(_kiwoom);
                     _kiwoomRealtime.Initialize();
                     _kiwoomRealtime.OnMarketDataReceived += md => PushMarketData(md);
                     _kiwoomOrder = new KiwoomOrderExecutor(_kiwoom);
                     _kiwoomOrder.SetAccount(_kiwoom.GetFirstAccount());
+
+                    // ★ 3단계: 계좌 조회 (로그인 성공 후 자동 실행)
+                    string acct = _kiwoom.GetFirstAccount();
+                    OnLog?.Invoke($"[키움] 계좌 {acct} 잔고/보유/미체결 조회 시작...");
+
+                    await Task.Delay(1000);  // TR 요청 간격
+                    await _kiwoomTr.QueryAccountBalanceAsync(acct);
+
+                    await Task.Delay(1000);  // TR 요청 간격 (키움 1초 제한)
+                    await _kiwoomTr.QueryPendingOrdersAsync(acct);
+
+                    OnLog?.Invoke("[키움] 계좌 조회 완료");
                 }
             }
             else
