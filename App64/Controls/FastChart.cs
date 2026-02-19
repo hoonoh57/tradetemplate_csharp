@@ -1368,7 +1368,7 @@ namespace App64.Controls
                     var res = _evalResults[idx];
                     if (res.IsBuySignal || res.IsSellSignal)
                     {
-                        var snapshots = SnapshotService.CreateSnapshots(Data, _customSeriesList);
+                        var snapshots = SnapshotService.CreateSnapshots(Data, _customSeriesList, TodayOpen);
                         var f = new StrategyInspectorForm(res, snapshots[idx], _appliedStrategy);
                         f.ShowDialog(); // [수정] 모달로 열어 무분별한 생성 방지
                         return;
@@ -1657,7 +1657,7 @@ namespace App64.Controls
             EnsureRequiredIndicators(strategy);
 
             // 전략 평가 실행
-            _evalResults = _evaluator.RunHistorical(strategy, Data, _customSeriesList);
+            _evalResults = _evaluator.RunHistorical(strategy, Data, _customSeriesList, TodayOpen);
             
             // 기존 신호 제거 및 새 신호 마커 주입
             _signals.Clear();

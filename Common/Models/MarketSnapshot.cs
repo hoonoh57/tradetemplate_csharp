@@ -17,9 +17,9 @@ namespace Common.Models
         public double Volume { get; }
         
         // 지표 이름 -> 값 매핑 (예: "SMA20" -> 5550.0, "SuperTrend" -> 5400.0)
-        public IReadOnlyDictionary<string, double> Indicators { get; }
+        public Dictionary<string, double> Indicators { get; }
 
-        public MarketSnapshot(DateTime time, double price, double o, double h, double l, double v, IReadOnlyDictionary<string, double> indicators)
+        public MarketSnapshot(DateTime time, double price, double o, double h, double l, double v, Dictionary<string, double> indicators)
         {
             Time = time;
             Price = price;
@@ -28,6 +28,11 @@ namespace Common.Models
             Low = l;
             Volume = v;
             Indicators = indicators ?? new Dictionary<string, double>();
+        }
+
+        public void SetIndicator(string name, double value)
+        {
+            Indicators[name] = value;
         }
 
         public double GetValue(string name)

@@ -11,14 +11,14 @@ namespace App64.Services
     /// </summary>
     public class StrategyEngine
     {
-        public EvaluationResult Evaluate(StrategyDefinition strategy, MarketSnapshot current, MarketSnapshot previous)
+        public EvaluationResult Evaluate(StrategyDefinition strategy, List<MarketSnapshot> snapshots, int currentIndex)
         {
-            if (strategy == null || current == null) return null;
+            if (strategy == null || snapshots == null || currentIndex < 0 || currentIndex >= snapshots.Count) return null;
 
+            var current = snapshots[currentIndex];
             var states = new Dictionary<string, bool>();
 
             // 1. 모든 개별 조건(ConditionCell) 선행 평가
-            // 중복 계산을 피하기 위해 모든 규칙의 조건을 모아서 한 번만 평가함.
             var allConditions = strategy.BuyRules
                 .Concat(strategy.SellRules)
                 .SelectMany(g => g.Conditions)
@@ -28,15 +28,15 @@ namespace App64.Services
 
             foreach (var cell in allConditions)
             {
-                states[cell.Id] = EvaluateCell(cell, current, previous);
+                states[cell.Id] = EvaluateCell(cell, snapshots, currentIndex);
             }
 
-            // 2. Buy 논리 게이트 평가 (여러 게이트 중 하나라도 참이면 매수 신호 - OR 구조)
+            // 2. Buy 논리 게이트 평가 (OR)
             bool isBuy = strategy.BuyRules
                 .Where(g => g.IsActive)
                 .Any(gate => EvaluateGate(gate, states));
 
-            // 3. Sell 논리 게이트 평가 (여러 게이트 중 하나라도 참이면 매도 신호 - OR 구조)
+            // 3. Sell 논리 게이트 평가 (OR)
             bool isSell = strategy.SellRules
                 .Where(g => g.IsActive)
                 .Any(gate => EvaluateGate(gate, states));
@@ -44,10 +44,15 @@ namespace App64.Services
             return new EvaluationResult(current.Time, strategy.Name, isBuy, isSell, states);
         }
 
-        private bool EvaluateCell(ConditionCell cell, MarketSnapshot curr, MarketSnapshot prev)
+        private bool EvaluateCell(ConditionCell cell, List<MarketSnapshot> snapshots, int index)
         {
-            double valA = curr.GetValue(cell.IndicatorA);
-            double valB = cell.IndicatorB != null ? curr.GetValue(cell.IndicatorB) : (cell.ConstantValue ?? double.NaN);
+            int targetIdx = index - cell.Offset;
+            if (targetIdx < 0 || targetIdx >= snapshots.Count) return false;
+
+            double valA = GetTargetValue(cell.IndicatorA, snapshots, targetIdx, cell.Lookback);
+            double valB = cell.IndicatorB != null 
+                ? GetTargetValue(cell.IndicatorB, snapshots, targetIdx, cell.Lookback) 
+                : (cell.ConstantValue ?? double.NaN);
 
             if (double.IsNaN(valA) || double.IsNaN(valB)) return false;
 
@@ -58,23 +63,39 @@ namespace App64.Services
                 case ComparisonOperator.LessThan: result = valA < valB; break;
                 case ComparisonOperator.GreaterThanOrEqual: result = valA >= valB; break;
                 case ComparisonOperator.LessThanOrEqual: result = valA <= valB; break;
-                case ComparisonOperator.Equal: result = Math.Abs(valA - valB) < 0.0000001; break;
-                case ComparisonOperator.NotEqual: result = Math.Abs(valA - valB) >= 0.0000001; break;
+                case ComparisonOperator.Equal: result = Math.Abs(valA - valB) < 0.000001; break;
+                case ComparisonOperator.NotEqual: result = Math.Abs(valA - valB) >= 0.000001; break;
                 case ComparisonOperator.CrossUp:
-                    if (prev == null) return false;
-                    double prevA = prev.GetValue(cell.IndicatorA);
-                    double prevB = cell.IndicatorB != null ? prev.GetValue(cell.IndicatorB) : (cell.ConstantValue ?? double.NaN);
+                    if (targetIdx <= 0) return false;
+                    double prevA = snapshots[targetIdx - 1].GetValue(cell.IndicatorA);
+                    double prevB = cell.IndicatorB != null ? snapshots[targetIdx - 1].GetValue(cell.IndicatorB) : (cell.ConstantValue ?? double.NaN);
                     result = (prevA <= prevB) && (valA > valB);
                     break;
                 case ComparisonOperator.CrossDown:
-                    if (prev == null) return false;
-                    double pA = prev.GetValue(cell.IndicatorA);
-                    double pB = cell.IndicatorB != null ? prev.GetValue(cell.IndicatorB) : (cell.ConstantValue ?? double.NaN);
+                    if (targetIdx <= 0) return false;
+                    double pA = snapshots[targetIdx - 1].GetValue(cell.IndicatorA);
+                    double pB = cell.IndicatorB != null ? snapshots[targetIdx - 1].GetValue(cell.IndicatorB) : (cell.ConstantValue ?? double.NaN);
                     result = (pA >= pB) && (valA < valB);
                     break;
             }
 
             return cell.IsInverted ? !result : result;
+        }
+
+        private double GetTargetValue(string key, List<MarketSnapshot> snaps, int index, int lookback)
+        {
+            if (lookback <= 1) return snaps[index].GetValue(key);
+
+            // Lookback > 1인 경우 범위 내 최대값 반환 (기본 전략적 직관: 돌파 등에서 High 참조 시 유용)
+            // 지표 성격에 따라 다를 수 있으나, 일단 Max(High) 식의 접근
+            double max = double.MinValue;
+            int start = Math.Max(0, index - lookback + 1);
+            for (int i = start; i <= index; i++)
+            {
+                double v = snaps[i].GetValue(key);
+                if (!double.IsNaN(v) && v > max) max = v;
+            }
+            return max == double.MinValue ? double.NaN : max;
         }
 
         private bool EvaluateGate(LogicGate gate, Dictionary<string, bool> states)

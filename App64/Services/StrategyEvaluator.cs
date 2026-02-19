@@ -17,18 +17,46 @@ namespace App64.Services
         /// <summary>
         /// 전체 데이터셋에 대해 전략을 평가하고 이력(Results)을 생성함.
         /// </summary>
-        public List<EvaluationResult> RunHistorical(StrategyDefinition strategy, List<FastChart.OHLCV> data, List<FastChart.CustomSeries> indicators)
+        public List<EvaluationResult> RunHistorical(StrategyDefinition strategy, List<FastChart.OHLCV> data, List<FastChart.CustomSeries> indicators, double todayOpen = 0)
         {
             if (strategy == null || data == null || data.Count == 0) return new List<EvaluationResult>();
 
-            var snapshots = SnapshotService.CreateSnapshots(data, indicators);
+            var snapshots = SnapshotService.CreateSnapshots(data, indicators, todayOpen);
             var results = new List<EvaluationResult>();
+
+            // 가상 포지션 상태 추적 (수익률 기반 매도를 위해)
+            double entryPrice = 0;
+            bool hasPosition = false;
 
             for (int i = 0; i < snapshots.Count; i++)
             {
-                var prev = i > 0 ? snapshots[i - 1] : null;
-                var curr = snapshots[i];
-                results.Add(_engine.Evaluate(strategy, curr, prev));
+                var snap = snapshots[i];
+
+                // [상태 반영] 현재 포지션이 있다면 수익률(PROFIT_PCT) 계산하여 주입
+                if (hasPosition && entryPrice > 0)
+                {
+                    snap.SetIndicator("PROFIT_PCT", (snap.Close - entryPrice) / entryPrice * 100.0);
+                }
+                else
+                {
+                    snap.SetIndicator("PROFIT_PCT", 0.0);
+                }
+
+                var res = _engine.Evaluate(strategy, snapshots, i);
+                
+                // [상태 업데이트] 매수/매도 시그널에 따른 가상 포지션 변화 기록
+                if (res.IsBuySignal && !hasPosition)
+                {
+                    hasPosition = true;
+                    entryPrice = snap.Close;
+                }
+                else if (res.IsSellSignal && hasPosition)
+                {
+                    hasPosition = false;
+                    entryPrice = 0;
+                }
+
+                results.Add(res);
             }
 
             return results;

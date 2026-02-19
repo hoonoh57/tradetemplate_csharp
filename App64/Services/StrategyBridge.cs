@@ -64,17 +64,25 @@ namespace App64.Services
 
             int condId = 1;
 
+            // [패넌 0] N일 중 ... 고가 돌파 (복합 로직)
+            // "10일중 전일대비 종가 상승률이 10% 이상인 일자의 고가를 돌파"
+            var mComplex = Regex.Match(part, @"(\d+)\s*(일|봉)\s*중\s*.*(\d+)\s*%\s*이상\s*.*고가를?\s*(돌파|이상)");
+            if (mComplex.Success)
+            {
+                int days = int.Parse(mComplex.Groups[1].Value);
+                // 실무적 해석: 최근 N일 중 급등했던 날의 고가를 의미함. 
+                // 엔진에서 Lookback과 IndicatorA="High"를 조합하여 '범위 내 최고가'로 근사화
+                results.Add(new ConditionCell($"B{condId++}", $"{days}일 내 급등고가 돌파", "Price", ComparisonOperator.CrossUp, "High", null, true, false, 1, days));
+            }
+
             // 패턴 1: 시가대비 X% 돌파/이상/하락
             var mOpen = Regex.Match(part, @"시가대비\s*(\d+(\.\d+)?)\s*%?\s*(상승|하락)?\s*(돌파|이상|이하|초과|미만)");
             if (mOpen.Success)
             {
                 double val = double.Parse(mOpen.Groups[1].Value);
                 if (mOpen.Groups[3].Value == "하락") val = -val;
-                
                 string opStr = mOpen.Groups[4].Value;
-                var op = MapOperator(opStr);
-                
-                results.Add(new ConditionCell($"B{condId++}", $"시가대비 {val}% {opStr}", "CHG_OPEN_PCT", op, null, val));
+                results.Add(new ConditionCell($"B{condId++}", $"시가대비 {val}% {opStr}", "CHG_OPEN_PCT", MapOperator(opStr), null, val));
             }
 
             // 패턴 2: 틱강도 X 이상/돌파
@@ -89,30 +97,37 @@ namespace App64.Services
             if (part.Contains("supertrend") || part.Contains("슈퍼트렌드"))
             {
                 if (part.Contains("상승추세") || part.Contains("위") || (isBuy && part.Contains("돌파")))
-                {
                     results.Add(new ConditionCell($"B{condId++}", "SuperTrend 상승 유지", "Price", ComparisonOperator.GreaterThan, "SuperTrend"));
-                }
                 else if (part.Contains("하락추세") || part.Contains("아래") || (!isBuy && part.Contains("이탈")))
-                {
                     results.Add(new ConditionCell($"B{condId++}", "SuperTrend 하락 유지", "Price", ComparisonOperator.LessThan, "SuperTrend"));
-                }
             }
 
-            // 패턴 4: 단순 수익률 매도 (9% 상승하면 매도 등)
+            // 패턴 4: 매도 특화 (VI 직전, 손절 등)
             if (!isBuy)
             {
+                // VI 직전 매도
+                if (part.Contains("vi") && (part.Contains("직전") || part.Contains("근접")))
+                {
+                    results.Add(new ConditionCell($"B{condId++}", "VI 상한가 근접 (99% 도달)", "Price", ComparisonOperator.GreaterThanOrEqual, "VI_UP_99"));
+                }
+
+                // 손절매 (-2% 하락 시 등)
+                var mStop = Regex.Match(part, @"(-?\d+)\s*%\s*(하락|이탈|손절|시)");
+                if (mStop.Success)
+                {
+                    double val = double.Parse(mStop.Groups[1].Value);
+                    if (val > 0) val = -val; // 하락은 음수로 처리
+                    results.Add(new ConditionCell($"B{condId++}", $"손절매 ({val}%)", "PROFIT_PCT", ComparisonOperator.LessThanOrEqual, null, val));
+                }
+
                 var mPctRange = Regex.Match(part, @"(\d+(\.\d+)?)\s*%?\s*(상승|하락)?\s*(하면|시)");
                 if (mPctRange.Success)
                 {
                     double val = double.Parse(mPctRange.Groups[1].Value);
                     if (mPctRange.Groups[3].Value == "하락")
-                    {
                          results.Add(new ConditionCell($"B{condId++}", $"시가대비 {val}% 하락 매도", "CHG_OPEN_PCT", ComparisonOperator.LessThanOrEqual, null, -val));
-                    }
                     else
-                    {
                          results.Add(new ConditionCell($"B{condId++}", $"시가대비 {val}% 상승 매도", "CHG_OPEN_PCT", ComparisonOperator.GreaterThanOrEqual, null, val));
-                    }
                 }
             }
 

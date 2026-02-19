@@ -12,7 +12,7 @@ namespace App64.Services
     /// </summary>
     public static class SnapshotService
     {
-        public static List<MarketSnapshot> CreateSnapshots(List<FastChart.OHLCV> candles, List<FastChart.CustomSeries> indicators)
+        public static List<MarketSnapshot> CreateSnapshots(List<FastChart.OHLCV> candles, List<FastChart.CustomSeries> indicators, double todayOpen = 0)
         {
             if (candles == null || candles.Count == 0) return new List<MarketSnapshot>();
 
@@ -32,21 +32,21 @@ namespace App64.Services
                 {
                     foreach (var kvp in indicatorValues)
                     {
-                        // 지표 데이터의 길이가 캔들보다 짧을 수 있으므로 인덱스 체크
-                        if (i < kvp.Value.Count)
-                        {
-                            snapshotIndicators[kvp.Key] = kvp.Value[i];
-                        }
-                        else
-                        {
-                            snapshotIndicators[kvp.Key] = double.NaN;
-                        }
+                        if (i < kvp.Value.Count) snapshotIndicators[kvp.Key] = kvp.Value[i];
+                        else snapshotIndicators[kvp.Key] = double.NaN;
                     }
                 }
 
-                // [가상 지표] 시가 대비 등락율 (%) 추가
+                // [가상 지표] 시가 대비 등락율 (%)
                 double openChg = candle.Open > 0 ? (candle.Close - candle.Open) / candle.Open * 100.0 : 0;
                 snapshotIndicators["CHG_OPEN_PCT"] = openChg;
+
+                // [가상 지표] VI 상한 근접지점 (10% 상승의 99% 지점)
+                double tOpen = (todayOpen > 0) ? todayOpen : candle.Open; // 당일 시가가 없으면 첫 봉 시가 기준
+                snapshotIndicators["VI_UP_99"] = tOpen * 1.10 * 0.99; 
+                
+                // [가상 지표] 수익률 (Position State가 없으므로 일단 0.0, 엔진에서 보완 가능)
+                snapshotIndicators["PROFIT_PCT"] = 0.0; 
 
                 snapshots.Add(new MarketSnapshot(
                     candle.DateVal,

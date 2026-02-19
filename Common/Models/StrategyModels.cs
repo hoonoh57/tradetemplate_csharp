@@ -35,15 +35,18 @@ namespace Common.Models
         [DataMember] public double? ConstantValue { get; set; }
         [DataMember] public bool IsActive { get; set; }
         [DataMember] public bool IsInverted { get; set; }
+        [DataMember] public int Offset { get; set; } = 0; // [추가] N봉 전 참조
+        [DataMember] public int Lookback { get; set; } = 1; // [추가] 통계적 범위 (1이면 현재봉)
 
         public ConditionCell() { } // Serialization constructor
-        public ConditionCell(string id, string desc, string indicatorA, ComparisonOperator op, string indicatorB = null, double? constantValue = null, bool isActive = true, bool isInverted = false)
+        public ConditionCell(string id, string desc, string indicatorA, ComparisonOperator op, string indicatorB = null, double? constantValue = null, bool isActive = true, bool isInverted = false, int offset = 0, int lookback = 1)
         {
             Id = id; Description = desc; IndicatorA = indicatorA; Operator = op;
             IndicatorB = indicatorB; ConstantValue = constantValue; IsActive = isActive; IsInverted = isInverted;
+            Offset = offset; Lookback = lookback;
         }
 
-        public ConditionCell SetActive(bool active) => new ConditionCell(Id, Description, IndicatorA, Operator, IndicatorB, ConstantValue, active, IsInverted);
+        public ConditionCell SetActive(bool active) => new ConditionCell(Id, Description, IndicatorA, Operator, IndicatorB, ConstantValue, active, IsInverted, Offset, Lookback);
     }
 
     [DataContract]
