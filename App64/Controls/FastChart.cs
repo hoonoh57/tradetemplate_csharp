@@ -1368,7 +1368,7 @@ namespace App64.Controls
                     var res = _evalResults[idx];
                     if (res.IsBuySignal || res.IsSellSignal)
                     {
-                        var snapshots = SnapshotService.CreateSnapshots(Data, _customSeriesList, TodayOpen);
+                        var snapshots = SnapshotService.CreateSnapshots(Data, _customSeriesList, TodayOpen, _appliedStrategy);
                         var f = new StrategyInspectorForm(res, snapshots[idx], _appliedStrategy);
                         f.ShowDialog(); // [수정] 모달로 열어 무분별한 생성 방지
                         return;

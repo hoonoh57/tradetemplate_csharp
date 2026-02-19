@@ -21,7 +21,7 @@ namespace App64.Services
         {
             if (strategy == null || data == null || data.Count == 0) return new List<EvaluationResult>();
 
-            var snapshots = SnapshotService.CreateSnapshots(data, indicators, todayOpen);
+            var snapshots = SnapshotService.CreateSnapshots(data, indicators, todayOpen, strategy);
             var results = new List<EvaluationResult>();
 
             // 가상 포지션 상태 추적 (수익률 기반 매도를 위해)

@@ -64,15 +64,19 @@ namespace App64.Services
 
             int condId = 1;
 
-            // [패넌 0] N일 중 ... 고가 돌파 (복합 로직)
+            // [패넌 0] N일 중 ... 고가 돌파 (복합 로직 - 일봉 기준)
             // "10일중 전일대비 종가 상승률이 10% 이상인 일자의 고가를 돌파"
             var mComplex = Regex.Match(part, @"(\d+)\s*(일|봉)\s*중\s*.*(\d+)\s*%\s*이상\s*.*고가를?\s*(돌파|이상)");
             if (mComplex.Success)
             {
                 int days = int.Parse(mComplex.Groups[1].Value);
-                // 실무적 해석: 최근 N일 중 급등했던 날의 고가를 의미함. 
-                // 엔진에서 Lookback과 IndicatorA="High"를 조합하여 '범위 내 최고가'로 근사화
-                results.Add(new ConditionCell($"B{condId++}", $"{days}일 내 급등고가 돌파", "Price", ComparisonOperator.CrossUp, "High", null, true, false, 1, days));
+                int pct = int.Parse(mComplex.Groups[3].Value);
+                
+                // 특수 가상 지표 이름 생성: DAILY_HIGH_COND_{days}_{pct}
+                // 이는 SnapshotService에서 동적으로 계산되어야 함
+                string indicatorName = $"DAILY_HIGH_COND_{days}_{pct}";
+                
+                results.Add(new ConditionCell($"B{condId++}", $"{days}일중 {pct}%이상 상승일 고가 돌파", "Price", ComparisonOperator.CrossUp, indicatorName));
             }
 
             // 패턴 1: 시가대비 X% 돌파/이상/하락
