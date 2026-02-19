@@ -62,32 +62,6 @@ namespace App64.Services
                 // [가상 지표] 수익률
                 snapshotIndicators["PROFIT_PCT"] = 0.0; 
 
-                // [가상 지표] 일봉 조건 고가 주입
-                if (dailyHighReqs.Count > 0 && dailyHighMap != null)
-                {
-                    int dateKey = GetDateKey(candle.DateVal);
-                    if (dailyHighMap.TryGetValue(dateKey, out double val))
-                    {
-                        // 모든 요청된 키에 대해 동일 값(해당 날짜 기준) 적용
-                        // (복잡한 경우: 날짜별로, 요청 키별로 값이 다를 수 있으나, 현재 구조상 
-                        //  ComputeDailyHighs가 Map<Date, Value>를 하나만 반환한다고 가정하면 안됨.
-                        //  개선: ComputeDailyHighs가 Dictionary<string, Dictionary<int, double>> 반환해야 함.
-                        //  여기서는 단순화를 위해 ComputeDailyHighs 내부에서 처리하도록 구조 변경 필요.
-                        //  -> 일단 아래 ComputeDailyHighsV2 로직 참조)
-                        
-                        // 임시: 단일 맵이 아니라, 여러 키에 대해 루프를 돌아야 함.
-                        // 하지만 dailyHighMap 구조상... V2 구조로 가야 함.
-                    }
-                }
-                
-                // [V2] 일봉 데이터 주입 (제대로 된 방식)
-                if (dailyHighReqs.Count > 0)
-                {
-                    // 최적화: Dictionary lookups per cell might be slow, but safe.
-                    // 미리 계산된 Dict<Key, Dict<Date, Value>>가 필요함.
-                    // 여기서는 코드를 간결하게 하기 위해 ComputeDailyValues가 모든걸 반환하도록 함.
-                }
-
                 snapshots.Add(new MarketSnapshot(
                     candle.DateVal,
                     candle.Close,
