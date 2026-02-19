@@ -30,6 +30,9 @@ namespace Server32
         private int _msgCount;
         private int _rtCount;
 
+        private readonly System.Collections.Concurrent.ConcurrentQueue<MarketData> _mdQueue = new System.Collections.Concurrent.ConcurrentQueue<MarketData>();
+        private readonly System.Timers.Timer _mdBatchTimer;
+
         public event Action<string> OnLog;
         public event Action<int, int> OnStatsUpdated;
 
@@ -40,6 +43,11 @@ namespace Server32
             _pipe.OnMessageReceived += OnPipeMessage;
 
             this.OnLog += msg => PushLog(msg);
+
+            _mdBatchTimer = new System.Timers.Timer(100);
+            _mdBatchTimer.Elapsed += (s, e) => SendMarketDataBatch();
+            _mdBatchTimer.AutoReset = true;
+            _mdBatchTimer.Start();
         }
 
         private void PushLog(string msg)
@@ -87,12 +95,11 @@ namespace Server32
             if (true)
             {
                 _cybosChart = new CybosStockChart(_cybos);
-                _cybosChart.Initialize();
+                _cybosChart.OnLog += msg => OnLog?.Invoke(msg); // 로그 연결
                 _cybosRealtime = new CybosRealtimeReceiver(_cybos);
                 _cybosRealtime.Initialize();
                 _cybosRealtime.OnMarketDataReceived += md => PushMarketData(md);
                 _cybosOrder = new CybosOrderExecutor(_cybos);
-                _cybosOrder.Initialize();
                 OnLog?.Invoke("[Cybos] 차트/실시간/주문 모듈 초기화 완료");
             }
 
@@ -211,14 +218,35 @@ namespace Server32
             try
             {
                 _rtCount++;
-                byte[] body = BinarySerializer.SerializeMarketData(md);
-                _pipe.SendAsync(MessageTypes.RealtimePush, 0, body).ConfigureAwait(false);
+                _mdQueue.Enqueue(md);
                 OnStatsUpdated?.Invoke(_msgCount, _rtCount);
             }
             catch (Exception ex)
             {
-                OnLog?.Invoke("Push 실패: " + ex.Message);
+                OnLog?.Invoke("Push Enqueue 실패: " + ex.Message);
             }
+        }
+
+        private void SendMarketDataBatch()
+        {
+            try
+            {
+                if (_mdQueue.IsEmpty) return;
+
+                var list = new List<MarketData>();
+                while (_mdQueue.TryDequeue(out var md))
+                {
+                    list.Add(md);
+                    if (list.Count >= 500) break; // 최대 500개씩 끊어서 전송
+                }
+
+                if (list.Count > 0)
+                {
+                    byte[] body = BinarySerializer.SerializeMarketDataBatch(list);
+                    _pipe.SendAsync(MessageTypes.RealtimeBatchPush, 0, body).ConfigureAwait(false);
+                }
+            }
+            catch { }
         }
 
         private async void OnPipeMessage(ushort msgType, uint seqNo, byte[] body)
@@ -518,12 +546,6 @@ namespace Server32
         {
             try
             {
-                if (_kiwoomTr == null)
-                {
-                    await _pipe.SendErrorAsync(seqNo, "키움 미접속");
-                    return;
-                }
-
                 using (var ms = new MemoryStream(body))
                 using (var br = new BinaryReader(ms, Encoding.UTF8))
                 {
@@ -532,16 +554,29 @@ namespace Server32
                     int interval = br.ReadInt32();
                     int count = br.ReadInt32();
 
-                    OnLog?.Invoke($"[캔들] 요청: {code} ({type}, {interval}분, {count}개)");
-                    var candles = await _kiwoomTr.RequestCandlesAsync(code, type, count);
+                    OnLog?.Invoke($"[캔들요청] Cybos 조회 시작: {code} ({type}, {interval}분, {count}개)");
+
+                    // [전격교체] 키움 대신 CybosPlus를 메인 데이터 서버로 사용
+                    IReadOnlyList<CandleData> candles;
+                    if (_cybosChart != null)
+                    {
+                        // Cybos TR은 동기 방식이므로 Task.Run으로 감싸서 응답성 유지
+                        candles = await Task.Run(() => _cybosChart.GetCandles(code, type, interval, count));
+                    }
+                    else
+                    {
+                        OnLog?.Invoke("[캔들 ERR] Cybos 모듈이 초기화되지 않았습니다.");
+                        candles = new List<CandleData>().AsReadOnly();
+                    }
 
                     byte[] respBody = BinarySerializer.SerializeCandleBatch(candles);
                     await _pipe.SendAsync(MessageTypes.CandleBatchResponse, seqNo, respBody);
-                    OnLog?.Invoke($"[캔들] 전송: {candles.Count}개");
+                    OnLog?.Invoke($"[캔들 완료] {code} {candles.Count}개 전송 완료 (Source: Cybos)");
                 }
             }
             catch (Exception ex)
             {
+                OnLog?.Invoke($"[캔들 실패] {ex.Message}");
                 await _pipe.SendErrorAsync(seqNo, $"캔들요청 실패: {ex.Message}");
             }
         }

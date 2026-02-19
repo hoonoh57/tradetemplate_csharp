@@ -66,6 +66,66 @@ namespace Bridge
             }
         }
 
+        public static byte[] SerializeMarketDataBatch(IReadOnlyList<MarketData> list)
+        {
+            using (var ms = new MemoryStream(4 + list.Count * 128))
+            using (var bw = new BinaryWriter(ms, Encoding.UTF8))
+            {
+                bw.Write(list.Count);
+                for (int i = 0; i < list.Count; i++)
+                {
+                    var md = list[i];
+                    bw.Write(md.Code ?? "");
+                    bw.Write(md.Time.ToBinary());
+                    bw.Write(md.Price);
+                    bw.Write(md.Open);
+                    bw.Write(md.High);
+                    bw.Write(md.Low);
+                    bw.Write(md.PrevClose);
+                    bw.Write(md.Volume);
+                    bw.Write(md.AccVolume);
+                    bw.Write(md.AccTradingValue);
+                    bw.Write(md.BidPrice1);
+                    bw.Write(md.AskPrice1);
+                    bw.Write(md.BidQty1);
+                    bw.Write(md.AskQty1);
+                    bw.Write(md.StrengthRate);
+                }
+                return ms.ToArray();
+            }
+        }
+
+        public static IReadOnlyList<MarketData> DeserializeMarketDataBatch(byte[] data)
+        {
+            using (var ms = new MemoryStream(data))
+            using (var br = new BinaryReader(ms, Encoding.UTF8))
+            {
+                int count = br.ReadInt32();
+                var list = new List<MarketData>(count);
+                for (int i = 0; i < count; i++)
+                {
+                    list.Add(new MarketData(
+                        code: br.ReadString(),
+                        time: DateTime.FromBinary(br.ReadInt64()),
+                        price: br.ReadInt32(),
+                        open: br.ReadInt32(),
+                        high: br.ReadInt32(),
+                        low: br.ReadInt32(),
+                        prevClose: br.ReadInt32(),
+                        volume: br.ReadInt64(),
+                        accVolume: br.ReadInt64(),
+                        accTradingValue: br.ReadInt64(),
+                        bidPrice1: br.ReadInt32(),
+                        askPrice1: br.ReadInt32(),
+                        bidQty1: br.ReadInt32(),
+                        askQty1: br.ReadInt32(),
+                        strengthRate: br.ReadDouble()
+                    ));
+                }
+                return list.AsReadOnly();
+            }
+        }
+
         // ═══════════════════════════════════════════
         //  CandleData 배치 — readonly struct
         // ═══════════════════════════════════════════
@@ -88,6 +148,7 @@ namespace Bridge
                     bw.Write(c.Close);
                     bw.Write(c.Volume);
                     bw.Write(c.TradingValue);
+                    bw.Write(c.TickCount); // [추가]
                 }
                 return ms.ToArray();
             }
@@ -111,7 +172,8 @@ namespace Bridge
                         low: br.ReadInt32(),
                         close: br.ReadInt32(),
                         volume: br.ReadInt64(),
-                        tradingValue: br.ReadInt64()
+                        tradingValue: br.ReadInt64(),
+                        tickCount: br.ReadInt32() // [추가]
                     ));
                 }
                 return list.AsReadOnly();

@@ -15,6 +15,7 @@ namespace Server32.Kiwoom
 
         // 캔들 버퍼
         private readonly List<CandleData> _candleBuffer = new List<CandleData>();
+        private readonly List<CandleData> _tickBuffer = new List<CandleData>(); // [추가] 틱 데이터 동기화용
 
         // 잔고 조회 결과
         private long _totalBuyAmount;
@@ -374,14 +375,13 @@ namespace Server32.Kiwoom
         // ══════════════════════════════════════════════
 
         public async Task<IReadOnlyList<CandleData>> RequestCandlesAsync(
-            string code, CandleType type, int count, int timeoutMs = 10000)
+            string code, CandleType type, int count, int timeoutMs = 30000)
         {
             _candleBuffer.Clear();
             _lastTrCode = type == CandleType.Daily ? "opt10081" : "opt10080";
             _lastRqName = "캔들조회";
 
             _connector.SetInputValue("종목코드", code);
-            
             if (type == CandleType.Daily)
             {
                 _connector.SetInputValue("기준일자", DateTime.Now.ToString("yyyyMMdd"));
@@ -389,18 +389,84 @@ namespace Server32.Kiwoom
             }
             else // Minute
             {
-                _connector.SetInputValue("틱범위", "1"); // 1분봉 고정 (interval 인자 확장 가능)
+                _connector.SetInputValue("틱범위", "1"); 
                 _connector.SetInputValue("수정주가구분", "1");
             }
 
             _trTcs = new TaskCompletionSource<bool>();
             _connector.CommRqData(_lastRqName, _lastTrCode, 0, "2000");
+            await Task.WhenAny(_trTcs.Task, Task.Delay(timeoutMs));
 
-            var timeout = Task.Delay(timeoutMs);
-            var completed = await Task.WhenAny(_trTcs.Task, timeout);
-            if (completed == timeout) return _candleBuffer.AsReadOnly();
+            // [추용] 1분봉인 경우, 120틱 캔들을 충분히(2페이지 정도) 가져와 참여도(TickIntensity) 동기화
+            if (type == CandleType.Minute)
+            {
+                _tickBuffer.Clear();
+                _lastTrCode = "opt10079";
+                _lastRqName = "틱캔들조회";
 
-            // 데이터는 시간순(과거->현재)으로 정렬하여 반환
+                // 1페이지 요청
+                _connector.SetInputValue("종목코드", code);
+                _connector.SetInputValue("틱범위", "120"); // 120틱 고정
+                _connector.SetInputValue("수정주가구분", "1");
+
+                _trTcs = new TaskCompletionSource<bool>();
+                _connector.CommRqData(_lastRqName, _lastTrCode, 0, "2001");
+                await Task.WhenAny(_trTcs.Task, Task.Delay(timeoutMs));
+
+                // 2페이지 요청 (더 과거의 틱캔들까지 커버)
+                if (_tickBuffer.Count > 0)
+                {
+                    _trTcs = new TaskCompletionSource<bool>();
+                    _connector.CommRqData(_lastRqName, _lastTrCode, 2, "2001"); // 연속조회
+                    await Task.WhenAny(_trTcs.Task, Task.Delay(timeoutMs));
+                }
+
+                OnLog?.Invoke($"[Sync] {code}분봉 {_candleBuffer.Count}개 vs {code}틱캔들 {_tickBuffer.Count}개 매칭 시작 (최적화 모드)...");
+
+                // 동기화 로직 최적화 (O(N+M)): 두 리스트 모두 Newest -> Oldest 순서임
+                if (_tickBuffer.Count > 0)
+                {
+                    int totalMatched = 0;
+                    int totalTicksFound = 0;
+                    int tickIdx = 0;
+
+                    for (int i = 0; i < _candleBuffer.Count; i++)
+                    {
+                        var minBar = _candleBuffer[i];
+                        var nextBarTime = minBar.DateTime.AddMinutes(1);
+                        
+                        // 현재 분봉의 시간 범위 [minBar.DateTime, nextBarTime) 에 속하는 틱들 찾기
+                        // _tickBuffer도 Newest -> Oldest이므로 현재 분봉보다 미래인 틱들은 건너뜀
+                        while (tickIdx < _tickBuffer.Count && _tickBuffer[tickIdx].DateTime >= nextBarTime)
+                        {
+                            tickIdx++;
+                        }
+
+                        int countInMin = 0;
+                        int tempIdx = tickIdx;
+                        // 현재 분봉 범위에 속하는 틱들 합산
+                        while (tempIdx < _tickBuffer.Count && _tickBuffer[tempIdx].DateTime >= minBar.DateTime)
+                        {
+                            countInMin++;
+                            tempIdx++;
+                        }
+
+                        if (countInMin > 0)
+                        {
+                            totalMatched++;
+                            totalTicksFound += countInMin;
+                        }
+
+                        _candleBuffer[i] = new CandleData(
+                            minBar.Code, minBar.DateTime, minBar.Type,
+                            minBar.Open, minBar.High, minBar.Low, minBar.Close,
+                            minBar.Volume, minBar.TradingValue, countInMin * 120
+                        );
+                    }
+                    OnLog?.Invoke($"[Sync] {code} 완료: {totalMatched}분봉 매칭됨 (총 {totalTicksFound}개 틱캔들 합산)");
+                }
+            }
+
             var result = new List<CandleData>(_candleBuffer);
             result.Reverse(); 
             return result.AsReadOnly();
@@ -434,7 +500,7 @@ namespace Server32.Kiwoom
                     ParseAccountBalance(e);
                 else if (e.sTrCode.Equals("opt10075", StringComparison.OrdinalIgnoreCase))
                     ParsePendingOrders(e);
-                else if (e.sTrCode == "opt10081" || e.sTrCode == "opt10080")
+                else if (e.sTrCode == "opt10081" || e.sTrCode == "opt10080" || e.sTrCode == "opt10079")
                     ParseCandles(e);
             }
             catch (Exception ex)
@@ -554,48 +620,73 @@ namespace Server32.Kiwoom
 
         private void ParseCandles(_DKHOpenAPIEvents_OnReceiveTrDataEvent e)
         {
-            int cnt = _connector.GetRepeatCnt(e.sTrCode, e.sRQName);
+            // [성능최적화] GetCommDataEx를 사용하여 벌크 데이터로 한 번에 가져옴 (COM Call 횟수 격감)
+            object dataObj = _connector.GetCommDataEx(e.sTrCode, e.sRQName);
+            if (dataObj == null) return;
+
+            // dataObj는 object[row, col] 형태의 2차원 배열
+            object[,] data = dataObj as object[,];
+            if (data == null) return;
+
+            int rowCount = data.GetLength(0);
             bool isDaily = e.sTrCode == "opt10081";
+            bool isTick = e.sTrCode == "opt10079";
+            var targetBuffer = isTick ? _tickBuffer : _candleBuffer;
 
-            for (int i = 0; i < cnt; i++)
+            // TR별 필드 인덱스 매핑 (키움 API 정의 기준)
+            // opt10081: 0:종목코드, 1:현재가, 2:거래량, 3:거래대금, 4:일자, 5:시가, 6:고가, 7:저가
+            // opt10080: 0:종목코드, 1:현재가, 2:거래량, 3:체결시간, 4:시가, 5:고가, 6:저가
+            // opt10079: 0:종목코드, 1:현재가, 2:거래량, 3:체결시간, 4:시가, 5:고가, 6:저가
+            
+            int idxTime = isDaily ? 4 : 3;
+            int idxOpen = isDaily ? 5 : 4;
+            int idxHigh = isDaily ? 6 : 5;
+            int idxLow = isDaily ? 7 : 6;
+            int idxClose = 1;
+            int idxVol = 2;
+            int idxVal = isDaily ? 3 : -1;
+
+            for (int i = 0; i < rowCount; i++)
             {
-                string dateStr = _connector.GetCommData(e.sTrCode, e.sRQName, i, isDaily ? "일자" : "체결시간").Trim();
-                string open = _connector.GetCommData(e.sTrCode, e.sRQName, i, "시가").Trim();
-                string high = _connector.GetCommData(e.sTrCode, e.sRQName, i, "고가").Trim();
-                string low = _connector.GetCommData(e.sTrCode, e.sRQName, i, "저가").Trim();
-                string close = _connector.GetCommData(e.sTrCode, e.sRQName, i, "현재가").Trim();
-                string vol = _connector.GetCommData(e.sTrCode, e.sRQName, i, "거래량").Trim();
-
-                if (string.IsNullOrEmpty(dateStr)) continue;
-
-                DateTime dt = DateTime.MinValue;
-                if (isDaily)
+                try
                 {
-                    dt = DateTime.ParseExact(dateStr, "yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture);
-                }
-                else
-                {
-                    // 분봉은 yyyyMMddHHmmss 또는 yyyyMMddHHmm (끝이 00초면 생략되기도 함)
-                    string fmt = dateStr.Length == 12 ? "yyyyMMddHHmm" : "yyyyMMddHHmmss";
-                    if (!DateTime.TryParseExact(dateStr, fmt, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out dt))
+                    string dateStr = data[i, idxTime]?.ToString().Trim();
+                    if (string.IsNullOrEmpty(dateStr)) continue;
+
+                    string open = data[i, idxOpen]?.ToString().Trim();
+                    string high = data[i, idxHigh]?.ToString().Trim();
+                    string low = data[i, idxLow]?.ToString().Trim();
+                    string close = data[i, idxClose]?.ToString().Trim();
+                    string vol = data[i, idxVol]?.ToString().Trim();
+                    string tradeVal = (idxVal >= 0) ? data[i, idxVal]?.ToString().Trim() : "";
+
+                    DateTime dt = DateTime.MinValue;
+                    if (isDaily)
                     {
-                        // Try parsing just the date part as a fallback if time part is missing or malformed
-                        if (dateStr.Length >= 8)
+                        dt = DateTime.ParseExact(dateStr, "yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture);
+                    }
+                    else
+                    {
+                        string fmt = dateStr.Length == 12 ? "yyyyMMddHHmm" : "yyyyMMddHHmmss";
+                        if (!DateTime.TryParseExact(dateStr, fmt, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out dt))
                         {
-                            DateTime.TryParseExact(dateStr.Substring(0, 8), "yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out dt);
+                            if (dateStr.Length >= 8)
+                                DateTime.TryParseExact(dateStr.Substring(0, 8), "yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out dt);
                         }
                     }
-                }
 
-                _candleBuffer.Add(new CandleData(
-                    code: "", dateTime: dt, type: isDaily ? CandleType.Daily : CandleType.Minute,
-                    open: Math.Abs(int.Parse(open)),
-                    high: Math.Abs(int.Parse(high)),
-                    low: Math.Abs(int.Parse(low)),
-                    close: Math.Abs(int.Parse(close)),
-                    volume: long.Parse(vol),
-                    tradingValue: 0
-                ));
+                    targetBuffer.Add(new CandleData(
+                        code: "", dateTime: dt, type: isDaily ? CandleType.Daily : (isTick ? CandleType.Tick : CandleType.Minute),
+                        open: Math.Abs(int.Parse(open)),
+                        high: Math.Abs(int.Parse(high)),
+                        low: Math.Abs(int.Parse(low)),
+                        close: Math.Abs(int.Parse(close)),
+                        volume: long.Parse(vol),
+                        tradingValue: string.IsNullOrEmpty(tradeVal) ? 0 : long.Parse(tradeVal),
+                        tickCount: isTick ? 1 : 0
+                    ));
+                }
+                catch { }
             }
         }
 

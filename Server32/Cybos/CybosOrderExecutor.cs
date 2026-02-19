@@ -7,25 +7,11 @@ namespace Server32.Cybos
     public class CybosOrderExecutor
     {
         private readonly CybosConnector _connector;
-        private dynamic _cpOrder;
-        private dynamic _cpModify;
-        private dynamic _cpCancel;
         private string _accountNo = "";
 
         public CybosOrderExecutor(CybosConnector connector)
         {
             _connector = connector;
-        }
-
-        public void Initialize()
-        {
-            try
-            {
-                _cpOrder = Activator.CreateInstance(Type.GetTypeFromProgID("CpTrade.CpTd0311"));
-                _cpModify = Activator.CreateInstance(Type.GetTypeFromProgID("CpTrade.CpTd0313"));
-                _cpCancel = Activator.CreateInstance(Type.GetTypeFromProgID("CpTrade.CpTd0314"));
-            }
-            catch { }
         }
 
         public void SetAccount(string accountNo)
@@ -35,27 +21,29 @@ namespace Server32.Cybos
 
         public OrderInfo SendOrder(string code, OrderType orderType, int price, int qty)
         {
-            if (_cpOrder == null || !_connector.IsConnected)
+            if (!_connector.IsConnected)
                 return MakeErrorOrder(code, orderType, price, qty, "Cybos 미연결");
 
+            dynamic cpOrder = null;
             try
             {
+                cpOrder = Activator.CreateInstance(Type.GetTypeFromProgID("CpTrade.CpTd0311"));
                 string buySell = orderType == OrderType.Buy ? "2" : "1";
 
-                _cpOrder.SetInputValue(0, buySell);
-                _cpOrder.SetInputValue(1, _accountNo);
-                _cpOrder.SetInputValue(2, "01");
-                _cpOrder.SetInputValue(3, code);
-                _cpOrder.SetInputValue(4, qty);
-                _cpOrder.SetInputValue(5, price);
+                cpOrder.SetInputValue(0, buySell);
+                cpOrder.SetInputValue(1, _accountNo);
+                cpOrder.SetInputValue(2, "01");
+                cpOrder.SetInputValue(3, code);
+                cpOrder.SetInputValue(4, qty);
+                cpOrder.SetInputValue(5, price);
 
-                _cpOrder.BlockRequest();
+                cpOrder.BlockRequest();
 
-                bool success = (int)_cpOrder.GetDibStatus() == 0;
-                string msg = (string)_cpOrder.GetDibMsg1();
+                bool success = (int)cpOrder.GetDibStatus() == 0;
+                string msg = (string)cpOrder.GetDibMsg1();
 
                 return new OrderInfo(
-                    orderNo: success ? _cpOrder.GetHeaderValue(0)?.ToString() ?? "" : "",
+                    orderNo: success ? cpOrder.GetHeaderValue(0)?.ToString() ?? "" : "",
                     origOrderNo: "",
                     code: code,
                     name: "",
@@ -76,23 +64,27 @@ namespace Server32.Cybos
             {
                 return MakeErrorOrder(code, orderType, price, qty, ex.Message);
             }
+            finally
+            {
+                if (cpOrder != null) System.Runtime.InteropServices.Marshal.ReleaseComObject(cpOrder);
+            }
         }
 
         public OrderInfo ModifyOrder(string origOrderNo, string code, int price, int qty)
         {
-            if (_cpModify == null) return MakeErrorOrder(code, OrderType.Buy, price, qty, "정정 객체 없음");
-
+            dynamic cpModify = null;
             try
             {
-                _cpModify.SetInputValue(0, origOrderNo);
-                _cpModify.SetInputValue(1, _accountNo);
-                _cpModify.SetInputValue(2, code);
-                _cpModify.SetInputValue(3, qty);
-                _cpModify.SetInputValue(4, price);
-                _cpModify.BlockRequest();
+                cpModify = Activator.CreateInstance(Type.GetTypeFromProgID("CpTrade.CpTd0313"));
+                cpModify.SetInputValue(0, origOrderNo);
+                cpModify.SetInputValue(1, _accountNo);
+                cpModify.SetInputValue(2, code);
+                cpModify.SetInputValue(3, qty);
+                cpModify.SetInputValue(4, price);
+                cpModify.BlockRequest();
 
-                bool success = (int)_cpModify.GetDibStatus() == 0;
-                string msg = (string)_cpModify.GetDibMsg1();
+                bool success = (int)cpModify.GetDibStatus() == 0;
+                string msg = (string)cpModify.GetDibMsg1();
 
                 return new OrderInfo(
                     orderNo: "", origOrderNo: origOrderNo, code: code, name: "",
@@ -107,22 +99,26 @@ namespace Server32.Cybos
             {
                 return MakeErrorOrder(code, OrderType.Buy, price, qty, "정정 오류: " + ex.Message);
             }
+            finally
+            {
+                if (cpModify != null) System.Runtime.InteropServices.Marshal.ReleaseComObject(cpModify);
+            }
         }
 
         public OrderInfo CancelOrder(string origOrderNo, string code, int qty)
         {
-            if (_cpCancel == null) return MakeErrorOrder(code, OrderType.Sell, 0, qty, "취소 객체 없음");
-
+            dynamic cpCancel = null;
             try
             {
-                _cpCancel.SetInputValue(0, origOrderNo);
-                _cpCancel.SetInputValue(1, _accountNo);
-                _cpCancel.SetInputValue(2, code);
-                _cpCancel.SetInputValue(3, qty);
-                _cpCancel.BlockRequest();
+                cpCancel = Activator.CreateInstance(Type.GetTypeFromProgID("CpTrade.CpTd0314"));
+                cpCancel.SetInputValue(0, origOrderNo);
+                cpCancel.SetInputValue(1, _accountNo);
+                cpCancel.SetInputValue(2, code);
+                cpCancel.SetInputValue(3, qty);
+                cpCancel.BlockRequest();
 
-                bool success = (int)_cpCancel.GetDibStatus() == 0;
-                string msg = (string)_cpCancel.GetDibMsg1();
+                bool success = (int)cpCancel.GetDibStatus() == 0;
+                string msg = (string)cpCancel.GetDibMsg1();
 
                 return new OrderInfo(
                     orderNo: "", origOrderNo: origOrderNo, code: code, name: "",
@@ -136,6 +132,10 @@ namespace Server32.Cybos
             catch (Exception ex)
             {
                 return MakeErrorOrder(code, OrderType.Sell, 0, qty, "취소 오류: " + ex.Message);
+            }
+            finally
+            {
+                if (cpCancel != null) System.Runtime.InteropServices.Marshal.ReleaseComObject(cpCancel);
             }
         }
 

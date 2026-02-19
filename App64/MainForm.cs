@@ -587,7 +587,7 @@ namespace App64
                 try
                 {
                     AppendLog($"[차트] 데이터 로드 시작: {stockName}({stockCode})");
-                    var candles = await _candle.GetCandlesAsync(stockCode, CandleType.Minute, 1, 300);
+                    var candles = await _candle.GetCandlesAsync(stockCode, CandleType.Minute, 1, 900);
                     
                     this.BeginInvoke((Action)(() =>
                     {

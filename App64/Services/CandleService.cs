@@ -32,7 +32,7 @@ namespace App64.Services
                 body = ms.ToArray();
             }
 
-            var resp = await _conn.RequestAsync(MessageTypes.CandleBatchRequest, body, 15000);
+            var resp = await _conn.RequestAsync(MessageTypes.CandleBatchRequest, body, 30000);
             return BinarySerializer.DeserializeCandleBatch(resp.respBody);
         }
 

@@ -33,19 +33,31 @@ namespace App64.Services
 
         private void HandlePush(ushort msgType, uint seqNo, byte[] body)
         {
-            if (msgType == MessageTypes.RealtimePush && body != null && body.Length > 0)
+            if (body == null || body.Length == 0) return;
+
+            try
             {
-                try
+                if (msgType == MessageTypes.RealtimePush)
                 {
                     var md = BinarySerializer.DeserializeMarketData(body);
-
-
-
-                    _lastData[md.Code] = md;
-                    OnMarketDataUpdated?.Invoke(md);
+                    UpdateMarketData(md);
                 }
-                catch { }
+                else if (msgType == MessageTypes.RealtimeBatchPush)
+                {
+                    var list = BinarySerializer.DeserializeMarketDataBatch(body);
+                    foreach (var md in list)
+                    {
+                        UpdateMarketData(md);
+                    }
+                }
             }
+            catch { }
+        }
+
+        private void UpdateMarketData(MarketData md)
+        {
+            _lastData[md.Code] = md;
+            OnMarketDataUpdated?.Invoke(md);
         }
 
         public async Task SubscribeAsync(string code)

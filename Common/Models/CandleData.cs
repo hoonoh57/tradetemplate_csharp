@@ -18,11 +18,12 @@ namespace Common.Models
         public int Close { get; }
         public long Volume { get; }
         public long TradingValue { get; }
+        public int TickCount { get; } // [추가] 해당 봉 내의 틱 횟수 (또는 합산된 틱캔들 수)
 
         public CandleData(
             string code, DateTime dateTime, CandleType type,
             int open, int high, int low, int close,
-            long volume, long tradingValue)
+            long volume, long tradingValue, int tickCount = 0)
         {
             Code = code;
             DateTime = dateTime;
@@ -33,6 +34,7 @@ namespace Common.Models
             Close = close;
             Volume = volume;
             TradingValue = tradingValue;
+            TickCount = tickCount;
         }
 
         /// <summary>변동률 (%)</summary>

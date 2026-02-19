@@ -297,10 +297,11 @@ namespace App64.Forms
                 tracker.CurrentBarTicks = 0;
             }
 
-            // 양봉 체결(가격 상승) 시에만 체결건수 누적
-            if (md.Price >= tracker.LastPrice && md.Volume > 0)
+            // 체결건수 누적 (사용자 로직: 1틱 체결 = 1건 증가)
+            // 역사 데이터(120틱 캔들 등)와의 동기화를 위해 모든 체결을 누적
+            if (md.Volume > 0)
             {
-                tracker.CurrentBarTicks += (int)md.Volume;
+                tracker.CurrentBarTicks += 1;
             }
             tracker.LastPrice = md.Price;
 

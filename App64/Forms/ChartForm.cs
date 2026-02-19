@@ -108,7 +108,7 @@ namespace App64.Forms
 
             try
             {
-                var candles = await _candleService.GetCandlesAsync(targetCode, CandleType.Minute, 1, 300);
+                var candles = await _candleService.GetCandlesAsync(targetCode, CandleType.Minute, 1, 900);
                 if (candles != null && candles.Count > 0)
                 {
                     _chart.AddComparisonSeries(targetCode, new List<CandleData>(candles));

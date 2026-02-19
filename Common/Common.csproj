@@ -47,6 +47,8 @@
     <Compile Include="Models\InstitutionData.cs" />
     <Compile Include="Models\NewsInfo.cs" />
     <Compile Include="Models\FinancialData.cs" />
+    <Compile Include="Models\StrategyModels.cs" />
+    <Compile Include="Models\MarketSnapshot.cs" />
     <Compile Include="Enums\MarketType.cs" />
     <Compile Include="Enums\OrderType.cs" />
     <Compile Include="Enums\CandleType.cs" />

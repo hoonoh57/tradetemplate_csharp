@@ -287,6 +287,9 @@ namespace Server32.Kiwoom
         public int GetRepeatCnt(string trCode, string rqName)
             => (int)_ocx.GetRepeatCnt(trCode, rqName);
 
+        public object GetCommDataEx(string trCode, string recordName)
+            => _ocx.GetCommDataEx(trCode, recordName);
+
         public string GetCommRealData(string code, int fid)
             => _ocx.GetCommRealData(code, fid)?.ToString() ?? "";
 
@@ -542,6 +545,9 @@ namespace Server32.Kiwoom
             => _api?.GetCommData(trCode, rqName, index, itemName)?.Trim() ?? "";
         public int GetRepeatCnt(string trCode, string rqName)
             => _api?.GetRepeatCnt(trCode, rqName) ?? 0;
+
+        public object GetCommDataEx(string trCode, string rqName)
+            => _api?.GetCommDataEx(trCode, rqName);
         public string GetCommRealData(string code, int fid)
             => _api?.GetCommRealData(code, fid)?.Trim() ?? "";
         public int SetRealReg(string screenNo, string codeList, string fidList, string optType)

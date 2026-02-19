@@ -18,6 +18,7 @@ namespace Bridge
         public const ushort RealtimeSubscribe  = 0x0020;
         public const ushort RealtimeUnsubscribe = 0x0021;
         public const ushort RealtimePush       = 0x0022;
+        public const ushort RealtimeBatchPush  = 0x0023;
 
         // ── 주문 ──
         public const ushort OrderRequest       = 0x0030;
@@ -83,6 +84,7 @@ namespace Bridge
                 case RealtimeSubscribe:   return "RtSub";
                 case RealtimeUnsubscribe: return "RtUnsub";
                 case RealtimePush:        return "RtPush";
+                case RealtimeBatchPush:   return "RtBatch";
                 case OrderRequest:        return "OrderReq";
                 case OrderResponse:       return "OrderResp";
                 case TradePush:           return "TradePush";

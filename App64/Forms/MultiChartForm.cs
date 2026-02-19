@@ -432,7 +432,7 @@ namespace App64.Forms
             try
             {
                 var candles = await _candleService.GetCandlesAsync(
-                    panel.StockCode, _globalTimeFrame, _globalInterval, 300);
+                    panel.StockCode, _globalTimeFrame, _globalInterval, 900);
 
                 if (candles != null && candles.Count > 0)
                 {
