@@ -284,6 +284,7 @@ namespace App64.Controls
         private StrategyDefinition _appliedStrategy;
         private List<EvaluationResult> _evalResults = new List<EvaluationResult>();
         private readonly StrategyEvaluator _evaluator = new StrategyEvaluator();
+        private SKRect _strategyLabelRect; // 전략 라벨 영역 (클릭 감지용)
         #endregion
 
         #region Properties
@@ -761,9 +762,35 @@ namespace App64.Controls
             float legendY = 20;
             DrawStockInfo(canvas, ref legendY);
             DrawLegends(canvas, ref legendY);
+            DrawStrategyLabel(canvas, ref legendY); // [추가] 전략 라벨 그리기
             
             // 실시간 가격 표시 (우측 축) — DrawPriceLines에서 라인을 그리지만, 라벨은 레이어상 최상단에 그림
             DrawDynamicPriceLabels(canvas, mainRange.Max, mainRange.Min);
+        }
+
+        private void DrawStrategyLabel(SKCanvas canvas, ref float yOffset)
+        {
+            if (_appliedStrategy == null) { _strategyLabelRect = SKRect.Empty; return; }
+
+            string text = $"★ 전략: {_appliedStrategy.Name} [삭제/편집]";
+            float padding = 6;
+            float tw = _paintText.MeasureText(text);
+            float th = _paintText.TextSize + padding * 2;
+            
+            float x = MainRect.Left + 10;
+            float y = yOffset;
+            
+            _strategyLabelRect = new SKRect(x, y, x + tw + padding * 2, y + th);
+            
+            using (var pBg = new SKPaint { Color = SKColors.Indigo.WithAlpha(200), Style = SKPaintStyle.Fill, IsAntialias = true })
+            using (var pBorder = new SKPaint { Color = SKColors.MediumSlateBlue, Style = SKPaintStyle.Stroke, StrokeWidth = 1, IsAntialias = true })
+            {
+                canvas.DrawRoundRect(_strategyLabelRect, 4, 4, pBg);
+                canvas.DrawRoundRect(_strategyLabelRect, 4, 4, pBorder);
+                canvas.DrawText(text, x + padding, y + th - padding - 2, _paintText);
+            }
+            
+            yOffset += th + 10;
         }
 
         private void DrawStaticAxes(SKCanvas canvas, int startIndex, int endIndex)
@@ -1239,20 +1266,16 @@ namespace App64.Controls
                 return;
             }
 
-            // [추가] 신호 클릭 시 전략 인스펙터 표시
-            if (_appliedStrategy != null && _evalResults != null)
+            // [수정] 차트 클릭 시 무분별한 분석창 생성을 막기 위해 하단 DoubleClick으로 이동
+            if (_appliedStrategy != null && _strategyLabelRect.Contains(e.X, e.Y))
             {
-                int idx = (int)Math.Round(_scrollOffset + (e.X - MainRect.Left) / (_candleWidth + _gap));
-                if (idx >= 0 && idx < _evalResults.Count)
+                if (MessageBox.Show($"전략 '{_appliedStrategy.Name}'을(를) 차트에서 제거하시겠습니까?", "전략 제거", MessageBoxButtons.YesNo) == DialogResult.Yes)
                 {
-                    var res = _evalResults[idx];
-                    if (res.IsBuySignal || res.IsSellSignal)
-                    {
-                        var snapshots = SnapshotService.CreateSnapshots(Data, _customSeriesList);
-                        var f = new StrategyInspectorForm(res, snapshots[idx], _appliedStrategy);
-                        f.Show();
-                    }
+                    _appliedStrategy = null;
+                    _signals.Clear();
+                    InvalidateCache();
                 }
+                return;
             }
 
             if (e.Button == MouseButtons.Left)
@@ -1325,6 +1348,32 @@ namespace App64.Controls
             {
                 IndicatorSettingsRequested?.Invoke(this, hitLegend.PanelName);
                 return;
+            }
+
+            // [추가] 전략 라벨 더블 클릭 -> 편집기 호출 (기존 자연어 유지)
+            if (_appliedStrategy != null && _strategyLabelRect.Contains(me.X, me.Y))
+            {
+                var f = new StrategyManagerForm((strategy) => { ApplyStrategy(strategy); });
+                f.SelectStrategyByName(_appliedStrategy.Name); // 기존 프롬프트가 로드됨
+                f.ShowDialog();
+                return;
+            }
+
+            // [추가] 신호 더블 클릭 -> 투명 데이터 인스펙터 호출 (모달)
+            if (_appliedStrategy != null && _evalResults != null)
+            {
+                int idx = (int)Math.Round(_scrollOffset + (me.X - MainRect.Left) / (_candleWidth + _gap));
+                if (idx >= 0 && idx < _evalResults.Count)
+                {
+                    var res = _evalResults[idx];
+                    if (res.IsBuySignal || res.IsSellSignal)
+                    {
+                        var snapshots = SnapshotService.CreateSnapshots(Data, _customSeriesList);
+                        var f = new StrategyInspectorForm(res, snapshots[idx], _appliedStrategy);
+                        f.ShowDialog(); // [수정] 모달로 열어 무분별한 생성 방지
+                        return;
+                    }
+                }
             }
 
             _isAutoScaleY = true; 

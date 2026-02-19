@@ -68,11 +68,13 @@ namespace Common.Models
         [DataMember] public string Description { get; set; }
         [DataMember] public List<LogicGate> BuyRules { get; set; }
         [DataMember] public List<LogicGate> SellRules { get; set; }
+        [DataMember] public string NaturalLanguagePrompt { get; set; } // [추가] 원문 자연어 저장
 
         public StrategyDefinition() { BuyRules = new List<LogicGate>(); SellRules = new List<LogicGate>(); }
-        public StrategyDefinition(string name, string desc, List<LogicGate> buy, List<LogicGate> sell)
+        public StrategyDefinition(string name, string desc, List<LogicGate> buy, List<LogicGate> sell, string nlPrompt = "")
         {
             Name = name; Description = desc; BuyRules = buy ?? new List<LogicGate>(); SellRules = sell ?? new List<LogicGate>();
+            NaturalLanguagePrompt = nlPrompt;
         }
     }
 

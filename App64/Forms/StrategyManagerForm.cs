@@ -111,6 +111,11 @@ namespace App64.Forms
             if (idx < 0) return;
 
             var s = _allStrategies[idx];
+            
+            // [추가] 선택 시 자연어 원문 불러오기 (수정/개선 용이성)
+            if (!string.IsNullOrEmpty(s.NaturalLanguagePrompt))
+                _txtPrompt.Text = s.NaturalLanguagePrompt;
+
             _tvLogic.Nodes.Clear();
             var root = _tvLogic.Nodes.Add(s.Name);
             
@@ -165,6 +170,18 @@ namespace App64.Forms
             if (idx >= 0) {
                 _onApply?.Invoke(_allStrategies[idx]);
                 this.Close();
+            }
+        }
+
+        public void SelectStrategyByName(string name)
+        {
+            for (int i = 0; i < _lstStrategies.Items.Count; i++)
+            {
+                if (_lstStrategies.Items[i].ToString() == name)
+                {
+                    _lstStrategies.SelectedIndex = i;
+                    break;
+                }
             }
         }
 

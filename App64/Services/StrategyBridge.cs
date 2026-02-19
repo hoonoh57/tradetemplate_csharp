@@ -52,7 +52,8 @@ namespace App64.Services
                 strategyName,
                 "자연어 해석 전략: " + nlPrompt,
                 new List<LogicGate> { buyGate },
-                new List<LogicGate> { sellGate }
+                new List<LogicGate> { sellGate },
+                nlPrompt // [추가] 원문 프롬프트 저장
             );
         }
 
