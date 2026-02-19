@@ -2347,18 +2347,23 @@ Public Class FastChart
                 End If
             End If
 
-            ' Time Label (Unchanged)
+            ' Time Label
             Dim indexAtMouse = GetIndexFromX(_mouseX)
-            If indexAtMouse >= 0 And indexAtMouse < Data.Count Then
+            If indexAtMouse >= 0 AndAlso indexAtMouse < Data.Count Then
                 Dim timeData = Data(indexAtMouse)
                 Dim timeStr = timeData.DateVal.ToString("MM/dd HH:mm")
+                
+                labelTx.TextAlign = SKTextAlign.Center
+                labelTx.Typeface = SKTypeface.FromFamilyName("Malgun Gothic")
+                
                 Dim tTextW = labelTx.MeasureText(timeStr)
-                Dim tLabelRect = SKRect.Create(_mouseX - tTextW / 2 - 5, TimeRect.Top, tTextW + 10, 20)
+                Dim tLabelRect = SKRect.Create(_mouseX - tTextW / 2 - 5, TimeRect.Top, tTextW + 10, AxisHeight - 2)
 
                 Using timeBg As New SKPaint With {.Color = CurrentTheme.CrosshairLabelBg, .Style = SKPaintStyle.Fill}
                     canvas.DrawRect(tLabelRect, timeBg)
                 End Using
-                canvas.DrawText(timeStr, _mouseX - tTextW / 2, TimeRect.Top + 14, labelTx)
+                
+                canvas.DrawText(timeStr, _mouseX, TimeRect.Top + 16, labelTx)
 
                 RaiseEvent CrosshairMoved(Me, New CrosshairEventArgs With {
                     .Price = If(isInMainChart, GetPriceFromY(_mouseY, maxP, minP, MainRect), 0),

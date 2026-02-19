@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using System.Windows.Forms;
 using Common.Models;
 using WeifenLuo.WinFormsUI.Docking;
@@ -12,6 +13,28 @@ namespace App64.Forms
         private readonly MainForm _mainForm;
         private readonly Controls.FastGrid _grid;
         private readonly Dictionary<string, int> _stockRowMap = new Dictionary<string, int>();
+
+        // 필터 관련
+        private ToolStrip _toolbar;
+        private ToolStripButton _btnFilter;
+        private ToolStripTextBox _txtThreshold;
+        private bool _isFilterEnabled = false;
+        private double _filterThreshold = 0.0;
+
+        // 전체 종목 데이터 캐시
+        private readonly List<string> _allCodes = new List<string>();
+        private readonly Dictionary<string, (string name, string price)> _initialData = new Dictionary<string, (string, string)>();
+        private readonly Dictionary<string, MarketData> _marketDataMap = new Dictionary<string, MarketData>();
+
+        // 종목별 체결건수 추적용
+        private class TickTracker
+        {
+            public DateTime BarStart;       // 현재 봉 시작 시각
+            public int CurrentBarTicks;     // 현재 봉의 양봉 체결건수 합계
+            public int MaxDayTicks;         // 당일 최대 체결건수
+            public int LastPrice;           // 마지막 체결가 (양봉 판정용)
+        }
+        private readonly Dictionary<string, TickTracker> _tickTrackers = new Dictionary<string, TickTracker>();
 
         public WatchForm() : this(null) { }
 
@@ -44,8 +67,92 @@ namespace App64.Forms
             _grid.AddColumn("VIDist",   "VI%",      60);
             _grid.AddColumn("Signal",   "신호",     50);
 
+            _grid.CellValueNeeded += (s, e) => { /* virtual mode not used here yet */ };
             _grid.CellDoubleClick += Grid_CellDoubleClick;
-            this.Controls.Add(_grid);
+
+            SetupToolbar();
+
+            var panel = new Panel { Dock = DockStyle.Fill };
+            panel.Controls.Add(_grid);
+            panel.Controls.Add(_toolbar);
+            this.Controls.Add(panel);
+        }
+
+        private void SetupToolbar()
+        {
+            _toolbar = new ToolStrip
+            {
+                Dock = DockStyle.Top,
+                BackColor = Color.FromArgb(45, 45, 55),
+                ForeColor = Color.White,
+                GripStyle = ToolStripGripStyle.Hidden,
+                RenderMode = ToolStripRenderMode.Professional
+            };
+
+            _btnFilter = new ToolStripButton("필터 적용")
+            {
+                CheckOnClick = true,
+                ForeColor = Color.Silver,
+                DisplayStyle = ToolStripItemDisplayStyle.ImageAndText,
+                Image = SystemIcons.Question.ToBitmap() // Placeholder
+            };
+            _btnFilter.CheckedChanged += (s, e) => {
+                _isFilterEnabled = _btnFilter.Checked;
+                _btnFilter.ForeColor = _isFilterEnabled ? Color.Yellow : Color.Silver;
+                RefreshGrid();
+            };
+
+            _toolbar.Items.Add(_btnFilter);
+            _toolbar.Items.Add(new ToolStripLabel(" 등락% ≥") { ForeColor = Color.LightGray });
+
+            _txtThreshold = new ToolStripTextBox
+            {
+                Text = "0.00",
+                Width = 50,
+                BackColor = Color.FromArgb(30, 30, 40),
+                ForeColor = Color.Lime,
+                TextBoxTextAlign = HorizontalAlignment.Center
+            };
+            _txtThreshold.TextChanged += (s, e) => {
+                if (double.TryParse(_txtThreshold.Text, out double val))
+                {
+                    _filterThreshold = val;
+                    if (_isFilterEnabled) RefreshGrid();
+                }
+            };
+            _toolbar.Items.Add(_txtThreshold);
+        }
+
+        private void RefreshGrid()
+        {
+            _grid.ClearRows();
+            _stockRowMap.Clear();
+
+            foreach (var code in _allCodes)
+            {
+                bool hasMD = _marketDataMap.TryGetValue(code, out var md);
+                double change = hasMD ? Math.Abs(md.ChangeRate) : 0;
+
+                if (_isFilterEnabled && change < _filterThreshold)
+                    continue;
+
+                var rowData = new Dictionary<string, string>
+                {
+                    ["Code"] = code,
+                    ["Name"] = _initialData.ContainsKey(code) ? _initialData[code].name : "",
+                    ["Price"] = _initialData.ContainsKey(code) ? _initialData[code].price : "0"
+                };
+
+                int rowIdx = _grid.Rows.Count;
+                _grid.AddRow(rowData);
+                _stockRowMap[code] = rowIdx;
+
+                if (hasMD)
+                {
+                    // 기존 데이터가 있으면 업데이트 (UI 갱신을 위해 직접 호출 보다는 UpdateMarketData 재사용 구조가 좋으나 여기선 즉시 반영)
+                    UpdateRowValues(rowIdx, md);
+                }
+            }
         }
 
         // ── 더블클릭 → 차트 열기 ──
@@ -67,8 +174,9 @@ namespace App64.Forms
                 return;
             }
 
-            _grid.ClearRows();
-            _stockRowMap.Clear();
+            _allCodes.Clear();
+            _initialData.Clear();
+            _marketDataMap.Clear();
 
             var items = payload.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
             foreach (var item in items)
@@ -76,20 +184,18 @@ namespace App64.Forms
                 var fields = item.Split('|');
                 if (fields.Length < 2) continue;
 
-                var rowData = new Dictionary<string, string>
-                {
-                    ["Code"] = fields[0],
-                    ["Name"] = fields.Length > 1 ? fields[1] : "",
-                    ["Price"] = fields.Length > 2 ? fields[2] : ""
-                };
+                string code = fields[0];
+                string name = fields.Length > 1 ? fields[1] : "";
+                string price = fields.Length > 2 ? fields[2] : "";
 
-                int rowIdx = _grid.Rows.Count;
-                _grid.AddRow(rowData);
-                _stockRowMap[fields[0]] = rowIdx;
+                _allCodes.Add(code);
+                _initialData[code] = (name, price);
 
                 // 실시간 등록
-                _ = _mainForm?.SubscribeRealtimeAsync(fields[0]);
+                _ = _mainForm?.SubscribeRealtimeAsync(code);
             }
+
+            RefreshGrid();
         }
         // ── 실시간 조건 편입/이탈 ──
         public void OnConditionRealtime(string payload)
@@ -109,18 +215,12 @@ namespace App64.Forms
 
             if (type == "I")
             {
-                if (!_stockRowMap.ContainsKey(code))
-                {
-                    var rowData = new Dictionary<string, string>
+                    if (!_allCodes.Contains(code))
                     {
-                        ["Code"] = code,
-                        ["Name"] = name,
-                        ["Price"] = "0"
-                    };
-                    int rowIdx = _grid.Rows.Count;
-                    _grid.AddRow(rowData);
-                    _stockRowMap[code] = rowIdx;
-                    _ = _mainForm?.SubscribeRealtimeAsync(code);
+                        _allCodes.Add(code);
+                        _initialData[code] = (name, "0");
+                        RefreshGrid();
+                        _ = _mainForm?.SubscribeRealtimeAsync(code);
                 }
             }
             else if (type == "D")
@@ -140,14 +240,31 @@ namespace App64.Forms
                 return;
             }
 
-            if (!_stockRowMap.TryGetValue(md.Code, out int rowIdx)) return;
-            if (rowIdx >= _grid.Rows.Count) return;
+            _marketDataMap[md.Code] = md;
 
+            bool isCurrentlyVisible = _stockRowMap.TryGetValue(md.Code, out int rowIdx);
+            bool shouldBeVisible = !_isFilterEnabled || Math.Abs(md.ChangeRate) >= _filterThreshold;
+
+            if (isCurrentlyVisible != shouldBeVisible)
+            {
+                RefreshGrid();
+                return;
+            }
+
+            if (shouldBeVisible && isCurrentlyVisible)
+            {
+                UpdateRowValues(rowIdx, md);
+            }
+        }
+
+        private void UpdateRowValues(int rowIdx, MarketData md)
+        {
             _grid.UpdateRow(rowIdx, "Price", md.Price.ToString("N0"));
 
-            double changeRate = md.ChangeRate;
-            string sign = changeRate >= 0 ? "+" : "";
-            _grid.UpdateRow(rowIdx, "Change", sign + changeRate.ToString("F2") + "%");
+            // 전일대비등락률(00.00%) 형식 (부호 포함, 자릿수 고정)
+            _grid.UpdateRow(rowIdx, "Change", md.ChangeRate.ToString("+00.00;-00.00;00.00") + "%");
+
+            // 거래량
             _grid.UpdateRow(rowIdx, "Volume", md.AccVolume.ToString("N0"));
 
             // 시가 대비
@@ -156,6 +273,60 @@ namespace App64.Forms
                 double openDiff = (double)(md.Price - md.Open) / md.Open * 100.0;
                 _grid.UpdateRow(rowIdx, "OpenDiff", openDiff.ToString("+0.00;-0.00;0.00") + "%");
             }
+
+            // 체결건수 (현재 분봉 시간구간의 양봉 체결건수 합계)
+            if (!_tickTrackers.TryGetValue(md.Code, out var tracker))
+            {
+                tracker = new TickTracker
+                {
+                    BarStart = new DateTime(md.Time.Year, md.Time.Month, md.Time.Day, md.Time.Hour, md.Time.Minute, 0),
+                    CurrentBarTicks = 0,
+                    MaxDayTicks = 0,
+                    LastPrice = md.Price
+                };
+                _tickTrackers[md.Code] = tracker;
+            }
+
+            var barStart = new DateTime(md.Time.Year, md.Time.Month, md.Time.Day, md.Time.Hour, md.Time.Minute, 0);
+            if (barStart > tracker.BarStart)
+            {
+                // 새 봉으로 전환: 이전 봉의 체결건수를 최대값에 반영 후 리셋
+                if (tracker.CurrentBarTicks > tracker.MaxDayTicks)
+                    tracker.MaxDayTicks = tracker.CurrentBarTicks;
+                tracker.BarStart = barStart;
+                tracker.CurrentBarTicks = 0;
+            }
+
+            // 양봉 체결(가격 상승) 시에만 체결건수 누적
+            if (md.Price >= tracker.LastPrice && md.Volume > 0)
+            {
+                tracker.CurrentBarTicks += (int)md.Volume;
+            }
+            tracker.LastPrice = md.Price;
+
+            _grid.UpdateRow(rowIdx, "TickCnt", tracker.CurrentBarTicks.ToString("N0"));
+
+            // 틱비율 (당일 최고 체결건수 대비 현재 체결건수 비율)
+            int maxTicks = Math.Max(tracker.MaxDayTicks, tracker.CurrentBarTicks); // 실시간 현재봉도 포함
+            double tickRatio = maxTicks > 0 ? (double)tracker.CurrentBarTicks / maxTicks * 100.0 : 0;
+            _grid.UpdateRow(rowIdx, "TickRat", tickRatio.ToString("F0") + "%");
+
+            // VI 가격 (정적VI: 시가 대비 ±10%)
+            if (md.Open > 0)
+            {
+                int viUpPrice = (int)(md.Open * 1.10);
+                _grid.UpdateRow(rowIdx, "VIPrice", viUpPrice.ToString("N0"));
+
+                // VI 이격률 (현재가 → VI가격까지 남은 비율)
+                double viDist = (double)(viUpPrice - md.Price) / md.Price * 100.0;
+                _grid.UpdateRow(rowIdx, "VIDist", viDist.ToString("F1") + "%");
+            }
+
+            // 신호: 체결건수 > 10 AND 틱비율 > 50%
+            if (tracker.CurrentBarTicks > 10 && tickRatio > 50)
+                _grid.UpdateRow(rowIdx, "Signal", "★");
+            else
+                _grid.UpdateRow(rowIdx, "Signal", "");
         }
 
         // ── 기존 OnTickData 호환 (deprecated – Phase 3에서 제거) ──
@@ -166,8 +337,12 @@ namespace App64.Forms
 
         public void ClearAll()
         {
-            _grid.Rows.Clear();
+            _allCodes.Clear();
+            _initialData.Clear();
+            _marketDataMap.Clear();
+            _grid.ClearRows();
             _stockRowMap.Clear();
+            _tickTrackers.Clear();
         }
     }
 }

@@ -9,7 +9,8 @@ namespace App64.Forms
 {
     public class ConditionSearchForm : Form
     {
-        private readonly ConnectionService _conn;
+        private readonly MainForm _mainForm;
+        private readonly Services.ConnectionService _conn;
         private readonly ComboBox _cboConditions;
         private readonly Button _btnExecute;
         private readonly List<ConditionItem> _items = new List<ConditionItem>();
@@ -21,9 +22,10 @@ namespace App64.Forms
             public override string ToString() => $"[{Index:D2}] {Name}";
         }
 
-        public ConditionSearchForm(ConnectionService conn)
+        public ConditionSearchForm(MainForm mainForm)
         {
-            _conn = conn;
+            _mainForm = mainForm;
+            _conn = mainForm.Connection;
 
             this.Text = "조건검색";
             this.Size = new Size(400, 150);
@@ -107,7 +109,7 @@ namespace App64.Forms
             try
             {
                 _btnExecute.Enabled = false;
-                await _conn.ExecuteConditionAsync(item.Index, item.Name);
+                await _mainForm.ExecuteConditionAsync(item.Index, item.Name);
                 this.Close();
             }
             catch (Exception ex)

@@ -139,15 +139,8 @@ namespace Server32
                     await Task.Delay(1000);
                     await _kiwoomTr.QueryPendingOrdersAsync(acct);
 
-                    // ★ 4단계: 조건검색
-                    OnLog?.Invoke("[키움] 조건검색 시작...");
-                    await Task.Delay(1000);
-                    var conditions = await _kiwoomTr.LoadConditionListAsync();
-
-                    if (conditions.Count > 0)
-                    {
-                        await _kiwoomTr.ExecuteAllConditionsAsync();
-                    }
+                    // LoadConditionListAsync만 호출하여 목록만 로드
+                    await _kiwoomTr.LoadConditionListAsync();
 
                     //// ★ 5단계: 주문 테스트 (장중에만 실행)
                     //await RunOrderTestIfMarketOpen();
@@ -240,9 +233,7 @@ namespace Server32
                     case MessageTypes.LoginRequest:
                         await HandleLogin(seqNo);
                         break;
-                    case MessageTypes.CandleBatchRequest:
-                        await HandleCandleBatch(seqNo, body);
-                        break;
+
                     case MessageTypes.OrderRequest:
                         await HandleOrder(seqNo, body);
                         break;
@@ -260,14 +251,12 @@ namespace Server32
                         await HandleConditionRequest(seqNo, body);
                         break;
 
-                    case MessageTypes.SystemStartRequest:
-                        await _mainForm.StartTradingAsync();
-                        await _pipe.SendAsync(MessageTypes.SystemStartRequest, seqNo, null);
+                    case MessageTypes.BalanceRequest:
+                        await HandleBalanceRequest(seqNo);
                         break;
 
-                    case MessageTypes.SystemStopRequest:
-                        _mainForm.StopTrading();
-                        await _pipe.SendAsync(MessageTypes.SystemStopRequest, seqNo, null);
+                    case MessageTypes.CandleBatchRequest:
+                        await HandleCandleBatchRequest(seqNo, body);
                         break;
 
                     case MessageTypes.OrderTestRequest:
@@ -423,18 +412,36 @@ namespace Server32
 
         private async Task HandleConditionRequest(uint seqNo, byte[] body)
         {
+            // 키움 미연결 시 방어 처리
+            if (_kiwoomTr == null)
+            {
+                OnLog?.Invoke("[조건] 키움 미연결 상태 — 조건검색 불가");
+                await _pipe.SendAsync(MessageTypes.ConditionRequest, seqNo,
+                    BinarySerializer.SerializeString("ERROR:키움 미연결"));
+                return;
+            }
+
             string cmd = BinarySerializer.DeserializeString(body);
             if (cmd == "LIST")
             {
-                var list = await _kiwoomTr.LoadConditionListAsync();
-                var sb = new StringBuilder();
-                foreach (var c in list)
+                try
                 {
-                    if (sb.Length > 0) sb.Append(";");
-                    sb.Append($"{c.Index}^{c.Name}");
+                    var list = await _kiwoomTr.LoadConditionListAsync();
+                    var sb = new StringBuilder();
+                    foreach (var c in list)
+                    {
+                        if (sb.Length > 0) sb.Append(";");
+                        sb.Append($"{c.Index}^{c.Name}");
+                    }
+                    await _pipe.SendAsync(MessageTypes.ConditionRequest, seqNo, BinarySerializer.SerializeString(sb.ToString()));
+                    OnLog?.Invoke($"[조건] 리스트 {list.Count}개 전송");
                 }
-                await _pipe.SendAsync(MessageTypes.ConditionRequest, seqNo, BinarySerializer.SerializeString(sb.ToString()));
-                OnLog?.Invoke($"[조건] 리스트 {list.Count}개 전송");
+                catch (Exception ex)
+                {
+                    OnLog?.Invoke("[조건] 리스트 로드 실패: " + ex.Message);
+                    await _pipe.SendAsync(MessageTypes.ConditionRequest, seqNo,
+                        BinarySerializer.SerializeString("ERROR:" + ex.Message));
+                }
             }
             else if (cmd.StartsWith("EXEC:"))
             {
@@ -443,18 +450,27 @@ namespace Server32
                 {
                     string name = parts[1];
                     OnLog?.Invoke($"[조건] 실행 요청: {name} ({idx})");
-                    var codes = await _kiwoomTr.ExecuteConditionAsync(new Server32.Kiwoom.ConditionInfo { Index = idx, Name = name });
-                    
-                    var stockInfoList = new StringBuilder();
-                    foreach (var code in codes)
+                    try
                     {
-                        string cname = _kiwoom.GetMasterCodeName(code);
-                        if (stockInfoList.Length > 0) stockInfoList.Append(";");
-                        stockInfoList.Append($"{code}|{cname}|0");
-                    }
+                        var codes = await _kiwoomTr.ExecuteConditionAsync(new Server32.Kiwoom.ConditionInfo { Index = idx, Name = name });
 
-                    await _pipe.SendAsync(MessageTypes.ConditionResult, seqNo, BinarySerializer.SerializeString(stockInfoList.ToString()));
-                    OnLog?.Invoke($"[조건] 실행 결과 {codes.Count}종목 전송");
+                        var stockInfoList = new StringBuilder();
+                        foreach (var code in codes)
+                        {
+                            string cname = _kiwoom?.GetMasterCodeName(code) ?? code;
+                            if (stockInfoList.Length > 0) stockInfoList.Append(";");
+                            stockInfoList.Append($"{code}|{cname}|0");
+                        }
+
+                        await _pipe.SendAsync(MessageTypes.ConditionResult, seqNo, BinarySerializer.SerializeString(stockInfoList.ToString()));
+                        OnLog?.Invoke($"[조건] 실행 결과 {codes.Count}종목 전송");
+                    }
+                    catch (Exception ex)
+                    {
+                        OnLog?.Invoke("[조건] 실행 실패: " + ex.Message);
+                        await _pipe.SendAsync(MessageTypes.ConditionResult, seqNo,
+                            BinarySerializer.SerializeString(""));
+                    }
                 }
             }
         }
@@ -473,6 +489,61 @@ namespace Server32
             OnLog?.Invoke("실시간 해제: " + code);
             _kiwoomRealtime?.Unsubscribe(code);
             _cybosRealtime?.Unsubscribe(code);
+        }
+
+        private async Task HandleBalanceRequest(uint seqNo)
+        {
+            try
+            {
+                if (_kiwoomTr == null)
+                {
+                    await _pipe.SendErrorAsync(seqNo, "키움 미접속");
+                    return;
+                }
+
+                string acct = _kiwoom.GetFirstAccount();
+                var balances = await _kiwoomTr.QueryAccountBalanceAsync(acct);
+
+                byte[] body = BinarySerializer.SerializeBalanceBatch(balances);
+                await _pipe.SendAsync(MessageTypes.BalanceResponse, seqNo, body);
+                OnLog?.Invoke($"[잔고] {balances.Count}종목 전송");
+            }
+            catch (Exception ex)
+            {
+                await _pipe.SendErrorAsync(seqNo, $"잔고조회 실패: {ex.Message}");
+            }
+        }
+
+        private async Task HandleCandleBatchRequest(uint seqNo, byte[] body)
+        {
+            try
+            {
+                if (_kiwoomTr == null)
+                {
+                    await _pipe.SendErrorAsync(seqNo, "키움 미접속");
+                    return;
+                }
+
+                using (var ms = new MemoryStream(body))
+                using (var br = new BinaryReader(ms, Encoding.UTF8))
+                {
+                    string code = br.ReadString();
+                    CandleType type = (CandleType)br.ReadInt32();
+                    int interval = br.ReadInt32();
+                    int count = br.ReadInt32();
+
+                    OnLog?.Invoke($"[캔들] 요청: {code} ({type}, {interval}분, {count}개)");
+                    var candles = await _kiwoomTr.RequestCandlesAsync(code, type, count);
+
+                    byte[] respBody = BinarySerializer.SerializeCandleBatch(candles);
+                    await _pipe.SendAsync(MessageTypes.CandleBatchResponse, seqNo, respBody);
+                    OnLog?.Invoke($"[캔들] 전송: {candles.Count}개");
+                }
+            }
+            catch (Exception ex)
+            {
+                await _pipe.SendErrorAsync(seqNo, $"캔들요청 실패: {ex.Message}");
+            }
         }
     }
 }

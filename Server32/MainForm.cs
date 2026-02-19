@@ -10,8 +10,7 @@ namespace Server32
     {
         private PipeServer _pipeServer;
         private ServerDispatcher _dispatcher;
-        private int _msgCount;
-        private int _rtCount;
+        private bool _initialized;
 
         public MainForm()
         {
@@ -22,116 +21,60 @@ namespace Server32
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
-            AutoStartPipe();
+            StartServer();
         }
 
-        private void AutoStartPipe()
+        // ═══════════════════════════════════════════
+        //  서버 자동 시작 (사용자 조작 없음)
+        // ═══════════════════════════════════════════
+        private async void StartServer()
         {
-            try
-            {
-                _pipeServer = new PipeServer();
-                _pipeServer.OnClientConnectionChanged += OnPipeConnection;
-                _pipeServer.OnError += err => SafeLog($"[PIPE ERR] {err}");
-                _ = _pipeServer.StartAsync();
-                UpdatePipeStatus(false);
-                Log("[PIPE] Named Pipe 서버 자동 대기중...");
-
-                _dispatcher = new ServerDispatcher(_pipeServer, this);
-                _dispatcher.OnLog += SafeLog;
-                _dispatcher.OnStatsUpdated += UpdateStats;
-            }
-            catch (Exception ex)
-            {
-                Log($"[ERR] Pipe 시작 실패: {ex.Message}");
-            }
-        }
-
-        public async Task StartTradingAsync()
-        {
-            if (btnStart.InvokeRequired)
-            {
-                await (Task)btnStart.Invoke(new Func<Task>(StartTradingAsync));
-                return;
-            }
-
-            if (!btnStart.Enabled) return;
-            btnStart_Click(null, null);
-        }
-
-        public void StopTrading()
-        {
-            if (btnStop.InvokeRequired)
-            {
-                btnStop.Invoke(new Action(StopTrading));
-                return;
-            }
-
-            if (!btnStop.Enabled) return;
-            btnStop_Click(null, null);
-        }
-
-        private async void btnStart_Click(object sender, EventArgs e)
-        {
-            btnStart.Enabled = false;
-            btnStop.Enabled = true;
-            Log("=== 서버 시작 ===");
-
             try
             {
                 // 1) Pipe 서버 시작
                 _pipeServer = new PipeServer();
                 _pipeServer.OnClientConnectionChanged += OnPipeConnection;
-                _pipeServer.OnError += err => SafeLog($"[PIPE ERR] {err}");
+                _pipeServer.OnError += err => Log($"[PIPE ERR] {err}");
                 _ = _pipeServer.StartAsync();
                 UpdatePipeStatus(false);
-                Log("[PIPE] Named Pipe 서버 대기중...");
+                Log("[PIPE] Named Pipe 서버 자동 대기중...");
 
-                // 2) 디스패처 생성 (키움/Cybos 초기화 포함)
-                // _dispatcher 는 이미 OnLoad에서 생성됨
+                // 2) 디스패처 생성
+                _dispatcher = new ServerDispatcher(_pipeServer, this);
+                _dispatcher.OnLog += Log;
+                _dispatcher.OnStatsUpdated += UpdateStats;
+
+                // 3) 키움/Cybos 자동 초기화
+                Log("=== 키움/Cybos 자동 초기화 시작 ===");
                 await _dispatcher.InitializeAsync();
-
-                Log("[OK] 서버 초기화 완료");
+                _initialized = true;
+                Log("=== 초기화 완료 — App64 명령 대기 ===");
             }
             catch (Exception ex)
             {
-                Log($"[ERR] 시작 실패: {ex.Message}");
-                btnStart.Enabled = true;
-                btnStop.Enabled = false;
+                Log($"[ERR] 서버 시작 실패: {ex.Message}");
             }
-        }
-
-        private void btnStop_Click(object sender, EventArgs e)
-        {
-            Log("=== 서버 중지 ===");
-            _dispatcher?.Shutdown();
-            _pipeServer?.Stop();
-            _pipeServer?.Dispose();
-            _pipeServer = null;
-            _dispatcher = null;
-
-            UpdateKiwoomStatus(false);
-            UpdateCybosStatus(false);
-            UpdatePipeStatus(false);
-
-            btnStart.Enabled = true;
-            btnStop.Enabled = false;
-            Log("[OK] 서버 중지 완료");
         }
 
         private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
         {
             _dispatcher?.Shutdown();
+            _pipeServer?.Stop();
             _pipeServer?.Dispose();
         }
 
-        // ── UI 업데이트 (thread-safe) ──
-
+        // ═══════════════════════════════════════════
+        //  Pipe 연결 이벤트
+        // ═══════════════════════════════════════════
         private void OnPipeConnection(bool connected)
         {
             SafeInvoke(() => UpdatePipeStatus(connected));
-            SafeLog(connected ? "[PIPE] 클라이언트 접속" : "[PIPE] 클라이언트 해제");
+            Log(connected ? "[PIPE] App64 접속" : "[PIPE] App64 연결 해제");
         }
 
+        // ═══════════════════════════════════════════
+        //  UI 업데이트 (thread-safe)
+        // ═══════════════════════════════════════════
         public void UpdateKiwoomStatus(bool connected)
         {
             SafeInvoke(() =>
@@ -167,11 +110,9 @@ namespace Server32
 
         private void UpdateStats(int msgCount, int rtCount)
         {
-            _msgCount = msgCount;
-            _rtCount = rtCount;
             SafeInvoke(() =>
             {
-                lblStats.Text = $"Msg: {_msgCount} | RT: {_rtCount} codes";
+                lblStats.Text = $"Msg: {msgCount} | RT: {rtCount}";
             });
         }
 
@@ -187,11 +128,6 @@ namespace Server32
             LogManager.Instance.Info(msg);
         }
 
-        private void SafeLog(string msg)
-        {
-            Log(msg);
-        }
-
         private void SafeInvoke(Action action)
         {
             if (InvokeRequired)
@@ -199,5 +135,9 @@ namespace Server32
             else
                 action();
         }
+
+        // App64에서 호출하던 메서드 — 이제 불필요하지만 호환성 유지
+        public Task StartTradingAsync() => Task.CompletedTask;
+        public void StopTrading() { }
     }
 }

@@ -266,7 +266,7 @@ namespace Server32.Kiwoom
 
         internal void RaiseOnReceiveRealCondition(string code, string type, string condName, string condIndex)
         {
-            DiagLog?.Invoke($"[AxKH] ★ RaiseOnReceiveRealCondition code={code} type={type} cond=\"{condName}\"");
+            //DiagLog?.Invoke($"[AxKH] ★ RaiseOnReceiveRealCondition code={code} type={type} cond=\"{condName}\"");
             OnReceiveRealCondition?.Invoke(this, new _DKHOpenAPIEvents_OnReceiveRealConditionEvent(
                 code, type, condName, condIndex));
         }

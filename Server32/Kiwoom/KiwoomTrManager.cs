@@ -116,7 +116,7 @@ namespace Server32.Kiwoom
 
             _condResultTcs = new TaskCompletionSource<string>();
 
-            int ret = _connector.SendCondition(scrNo, condition.Name, condition.Index, 0);
+            int ret = _connector.SendCondition(scrNo, condition.Name, condition.Index, 1);
             OnLog?.Invoke($"[조건] SendCondition(\"{condition.Name}\", idx={condition.Index}) ret={ret}");
 
             if (ret == 0)
@@ -142,11 +142,11 @@ namespace Server32.Kiwoom
             }
 
             result.AddRange(codes);
-            OnLog?.Invoke($"[조건] \"{condition.Name}\" 포착 {codes.Length}종목 → 일괄 시세 조회...");
+            OnLog?.Invoke($"[조건] \"{condition.Name}\" 포착 {codes.Length}종목");
 
-            // CommKwRqData로 일괄 조회
-            await Task.Delay(1000);  // TR 간격
-            await QueryMultiStockAsync(codes, condition.Name);
+            // CommKwRqData로 일괄 조회는 더 이상 필요 없음 (클라이언트 그리드에서 처리)
+            // await Task.Delay(1000);  // TR 간격
+            // await QueryMultiStockAsync(codes, condition.Name);
 
             return result;
         }
@@ -258,7 +258,7 @@ namespace Server32.Kiwoom
         {
             string name = _connector.GetMasterCodeName(code);
             string action = type == "I" ? "편입" : "이탈";
-            OnLog?.Invoke($"[조건실시간] [{condName}] {code} {name} → {action}");
+            //OnLog?.Invoke($"[조건실시간] [{condName}] {code} {name} → {action}");
             OnRealCondition?.Invoke(code, type, condName, condIndex);
         }
 
@@ -266,7 +266,7 @@ namespace Server32.Kiwoom
         //  계좌평가잔고내역 (opw00018)
         // ══════════════════════════════════════════════
 
-        public async Task QueryAccountBalanceAsync(string accountNo, int timeoutMs = 10000)
+        public async Task<List<BalanceInfo>> QueryAccountBalanceAsync(string accountNo, int timeoutMs = 10000)
         {
             _holdings.Clear();
             _totalBuyAmount = 0;
@@ -290,34 +290,36 @@ namespace Server32.Kiwoom
             if (ret != 0)
             {
                 OnLog?.Invoke($"[TR] opw00018 요청 실패 (ret={ret})");
-                return;
+                return new List<BalanceInfo>();
             }
 
             var completed = await Task.WhenAny(_trTcs.Task, Task.Delay(timeoutMs));
             if (completed != _trTcs.Task)
             {
                 OnLog?.Invoke("[TR] opw00018 타임아웃 — 이벤트 미수신");
-                return;
+                return new List<BalanceInfo>();
             }
 
             OnLog?.Invoke("════════════════════════════════════════");
-            OnLog?.Invoke($"  [총잔고] 매입금액: {_totalBuyAmount:N0}원");
-            OnLog?.Invoke($"  [총잔고] 평가금액: {_totalEvalAmount:N0}원");
-            OnLog?.Invoke($"  [총잔고] 손익합계: {_totalProfitLoss:N0}원 ({_totalProfitRate:F2}%)");
-            OnLog?.Invoke("────────────────────────────────────────");
 
-            if (_holdings.Count == 0)
+            var result = new List<BalanceInfo>();
+            foreach (var h in _holdings)
             {
-                OnLog?.Invoke("  보유종목 없음");
+                result.Add(new BalanceInfo(
+                    code: h.Code,
+                    name: h.Name,
+                    qty: h.Qty,
+                    avgPrice: (int)h.BuyPrice,
+                    currentPrice: (int)h.CurPrice,
+                    purchaseAmount: (long)h.Qty * (long)h.BuyPrice,
+                    evalAmount: (long)h.Qty * (long)h.CurPrice,
+                    profitLoss: h.ProfitLoss,
+                    profitRate: h.ProfitRate,
+                    market: MarketType.Kospi, // 기본값
+                    updateTime: DateTime.Now
+                ));
             }
-            else
-            {
-                foreach (var h in _holdings)
-                {
-                    OnLog?.Invoke($"  [{h.Code}] {h.Name} | {h.Qty}주 | 매입:{h.BuyPrice:N0} | 현재:{h.CurPrice:N0} | 손익:{h.ProfitLoss:N0}원 ({h.ProfitRate:F2}%)");
-                }
-            }
-            OnLog?.Invoke("════════════════════════════════════════");
+            return result;
         }
 
         // ══════════════════════════════════════════════
@@ -379,8 +381,17 @@ namespace Server32.Kiwoom
             _lastRqName = "캔들조회";
 
             _connector.SetInputValue("종목코드", code);
-            _connector.SetInputValue("기준일자", DateTime.Now.ToString("yyyyMMdd"));
-            _connector.SetInputValue("수정주가구분", "1");
+            
+            if (type == CandleType.Daily)
+            {
+                _connector.SetInputValue("기준일자", DateTime.Now.ToString("yyyyMMdd"));
+                _connector.SetInputValue("수정주가구분", "1");
+            }
+            else // Minute
+            {
+                _connector.SetInputValue("틱범위", "1"); // 1분봉 고정 (interval 인자 확장 가능)
+                _connector.SetInputValue("수정주가구분", "1");
+            }
 
             _trTcs = new TaskCompletionSource<bool>();
             _connector.CommRqData(_lastRqName, _lastTrCode, 0, "2000");
@@ -389,7 +400,10 @@ namespace Server32.Kiwoom
             var completed = await Task.WhenAny(_trTcs.Task, timeout);
             if (completed == timeout) return _candleBuffer.AsReadOnly();
 
-            return _candleBuffer.AsReadOnly();
+            // 데이터는 시간순(과거->현재)으로 정렬하여 반환
+            var result = new List<CandleData>(_candleBuffer);
+            result.Reverse(); 
+            return result.AsReadOnly();
         }
 
         // ══════════════════════════════════════════════
@@ -541,20 +555,40 @@ namespace Server32.Kiwoom
         private void ParseCandles(_DKHOpenAPIEvents_OnReceiveTrDataEvent e)
         {
             int cnt = _connector.GetRepeatCnt(e.sTrCode, e.sRQName);
+            bool isDaily = e.sTrCode == "opt10081";
+
             for (int i = 0; i < cnt; i++)
             {
-                string date = _connector.GetCommData(e.sTrCode, e.sRQName, i, "일자").Trim();
+                string dateStr = _connector.GetCommData(e.sTrCode, e.sRQName, i, isDaily ? "일자" : "체결시간").Trim();
                 string open = _connector.GetCommData(e.sTrCode, e.sRQName, i, "시가").Trim();
                 string high = _connector.GetCommData(e.sTrCode, e.sRQName, i, "고가").Trim();
                 string low = _connector.GetCommData(e.sTrCode, e.sRQName, i, "저가").Trim();
                 string close = _connector.GetCommData(e.sTrCode, e.sRQName, i, "현재가").Trim();
                 string vol = _connector.GetCommData(e.sTrCode, e.sRQName, i, "거래량").Trim();
 
-                DateTime dt = DateTime.ParseExact(date, "yyyyMMdd",
-                    System.Globalization.CultureInfo.InvariantCulture);
+                if (string.IsNullOrEmpty(dateStr)) continue;
+
+                DateTime dt = DateTime.MinValue;
+                if (isDaily)
+                {
+                    dt = DateTime.ParseExact(dateStr, "yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture);
+                }
+                else
+                {
+                    // 분봉은 yyyyMMddHHmmss 또는 yyyyMMddHHmm (끝이 00초면 생략되기도 함)
+                    string fmt = dateStr.Length == 12 ? "yyyyMMddHHmm" : "yyyyMMddHHmmss";
+                    if (!DateTime.TryParseExact(dateStr, fmt, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out dt))
+                    {
+                        // Try parsing just the date part as a fallback if time part is missing or malformed
+                        if (dateStr.Length >= 8)
+                        {
+                            DateTime.TryParseExact(dateStr.Substring(0, 8), "yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out dt);
+                        }
+                    }
+                }
 
                 _candleBuffer.Add(new CandleData(
-                    code: "", dateTime: dt, type: CandleType.Daily,
+                    code: "", dateTime: dt, type: isDaily ? CandleType.Daily : CandleType.Minute,
                     open: Math.Abs(int.Parse(open)),
                     high: Math.Abs(int.Parse(high)),
                     low: Math.Abs(int.Parse(low)),

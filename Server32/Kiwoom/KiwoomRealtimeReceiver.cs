@@ -45,17 +45,23 @@ namespace Server32.Kiwoom
             {
                 try
                 {
+                    int rawPrice = GetIntField(10);  // 현재가 (부호 포함)
+                    int rawChange = GetIntField(11); // 전일대비 (부호 포함) - 25번보다 11번이 표준
+
+                    int currentPrice = Math.Abs(rawPrice);
+                    int prevClose = currentPrice - rawChange; // 전일종가 = 현재가 - 전일대비
+
                     var md = new MarketData(
                         code: code,
                         time: DateTime.Now,
-                        price: Math.Abs(GetIntField(10)),
+                        price: currentPrice,
                         open: Math.Abs(GetIntField(16)),
                         high: Math.Abs(GetIntField(17)),
                         low: Math.Abs(GetIntField(18)),
-                        prevClose: Math.Abs(GetIntField(25)),
+                        prevClose: prevClose,
                         volume: GetLongField(15),
                         accVolume: GetLongField(13),
-                        accTradingValue: GetLongField(14),
+                        accTradingValue: GetLongField(14) * 1000, // 키움은 누적거래대금이 천원단위일 수 있음 (확인 필요하나 보통 FID 14는 원단위)
                         bidPrice1: Math.Abs(GetIntField(28)),
                         askPrice1: Math.Abs(GetIntField(27)),
                         bidQty1: GetIntField(29),

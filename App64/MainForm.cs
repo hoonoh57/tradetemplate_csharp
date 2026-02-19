@@ -1,8 +1,10 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using Common.Enums;
 using App64.Forms;
 using App64.Services;
 using Bridge;
@@ -33,8 +35,6 @@ namespace App64
         private ToolStrip _toolStrip;
         private ToolStripButton _btnConnect;
         private ToolStripButton _btnOrderTest;
-        private ToolStripButton _btnStartSrv;
-        private ToolStripButton _btnStopSrv;
         private ToolStripLabel _lblStatus;
         private StatusStrip _statusStrip;
         private ToolStripStatusLabel _lblConnState;
@@ -71,9 +71,13 @@ namespace App64
             };
 
             var mnuFile = new ToolStripMenuItem("파일(&F)");
-            mnuFile.DropDownItems.Add("조건검색(&Q)", null, (s, e) => ShowConditionSearch());
-            mnuFile.DropDownItems.Add(new ToolStripSeparator());
             mnuFile.DropDownItems.Add("종료(&X)", null, (s, e) => this.Close());
+
+            var mnuTrade = new ToolStripMenuItem("매매(&T)");
+            mnuTrade.DropDownItems.Add("조건검색 실행(&Q)", null, (s, e) => ShowConditionSearch());
+            mnuTrade.DropDownItems.Add("잔고 조회(&B)", null, async (s, e) => await RequestBalanceAsync());
+            mnuTrade.DropDownItems.Add(new ToolStripSeparator());
+            mnuTrade.DropDownItems.Add("주문 극한테스트(&T)", null, BtnOrderTest_Click);
 
             var mnuView = new ToolStripMenuItem("보기(&V)");
             mnuView.DropDownItems.Add("종목감시(&W)", null, (s, e) => ShowOrActivate(ref _watchForm));
@@ -81,17 +85,19 @@ namespace App64
             mnuView.DropDownItems.Add("로그(&L)", null, (s, e) => ShowOrActivate(ref _logForm));
             mnuView.DropDownItems.Add("설정(&S)", null, (s, e) => ShowOrActivate(ref _settingsForm));
             mnuView.DropDownItems.Add(new ToolStripSeparator());
+            mnuView.DropDownItems.Add("멀티차트(&M)", null, (s, e) => ShowMultiChart());
+            mnuView.DropDownItems.Add(new ToolStripSeparator());
             mnuView.DropDownItems.Add("레이아웃 초기화(&R)", null, (s, e) => ResetLayout());
 
             var mnuServer = new ToolStripMenuItem("서버(&S)");
             mnuServer.DropDownItems.Add("연결(&C)", null, async (s, e) => await ConnectAsync());
             mnuServer.DropDownItems.Add("연결해제(&D)", null, (s, e) => Disconnect());
 
-            _menuStrip.Items.AddRange(new ToolStripItem[] { mnuFile, mnuView, mnuServer });
+            _menuStrip.Items.AddRange(new ToolStripItem[] { mnuFile, mnuTrade, mnuView, mnuServer });
             this.MainMenuStrip = _menuStrip;
             this.Controls.Add(_menuStrip);
 
-            // ── ToolStrip ──
+            // ── ToolStrip (시스템 시작/중지 제거, 업무 버튼만) ──
             _toolStrip = new ToolStrip
             {
                 BackColor = Color.FromArgb(30, 30, 40),
@@ -107,29 +113,27 @@ namespace App64
             };
             _btnConnect.Click += async (s, e) => await ConnectAsync();
 
-            _btnOrderTest = new ToolStripButton("주문 극한테스트")
+            var btnCondition = new ToolStripButton("조건검색")
+            {
+                DisplayStyle = ToolStripItemDisplayStyle.Text,
+                ForeColor = Color.Cyan
+            };
+            btnCondition.Click += (s, e) => ShowConditionSearch();
+
+            var btnBalance = new ToolStripButton("잔고조회")
+            {
+                DisplayStyle = ToolStripItemDisplayStyle.Text,
+                ForeColor = Color.FromArgb(255, 180, 100)
+            };
+            btnBalance.Click += async (s, e) => await RequestBalanceAsync();
+
+            _btnOrderTest = new ToolStripButton("주문테스트")
             {
                 DisplayStyle = ToolStripItemDisplayStyle.Text,
                 ForeColor = Color.FromArgb(80, 180, 255),
                 Enabled = false
             };
             _btnOrderTest.Click += BtnOrderTest_Click;
-
-            _btnStartSrv = new ToolStripButton("시스템 시작")
-            {
-                DisplayStyle = ToolStripItemDisplayStyle.Text,
-                ForeColor = Color.FromArgb(100, 255, 100),
-                Enabled = false
-            };
-            _btnStartSrv.Click += async (s, e) => await _conn.SendAsync(MessageTypes.SystemStartRequest);
-
-            _btnStopSrv = new ToolStripButton("시스템 중지")
-            {
-                DisplayStyle = ToolStripItemDisplayStyle.Text,
-                ForeColor = Color.FromArgb(255, 120, 120),
-                Enabled = false
-            };
-            _btnStopSrv.Click += async (s, e) => await _conn.SendAsync(MessageTypes.SystemStopRequest);
 
             _lblStatus = new ToolStripLabel("대기중")
             {
@@ -141,8 +145,8 @@ namespace App64
             {
                 _btnConnect,
                 new ToolStripSeparator(),
-                _btnStartSrv,
-                _btnStopSrv,
+                btnCondition,
+                btnBalance,
                 new ToolStripSeparator(),
                 _btnOrderTest,
                 new ToolStripSeparator(),
@@ -150,24 +154,15 @@ namespace App64
             });
             this.Controls.Add(_toolStrip);
 
-            // ── StatusStrip ──
+            // ── StatusStrip (동일) ──
             _statusStrip = new StatusStrip
             {
                 BackColor = Color.FromArgb(25, 25, 35),
                 SizingGrip = false
             };
-            _lblConnState = new ToolStripStatusLabel("● 끊김")
-            {
-                ForeColor = Color.Red
-            };
-            _lblKiwoomState = new ToolStripStatusLabel("K:--")
-            {
-                ForeColor = Color.Gray
-            };
-            _lblCybosState = new ToolStripStatusLabel("C:--")
-            {
-                ForeColor = Color.Gray
-            };
+            _lblConnState = new ToolStripStatusLabel("● 끊김") { ForeColor = Color.Red };
+            _lblKiwoomState = new ToolStripStatusLabel("K:--") { ForeColor = Color.Gray };
+            _lblCybosState = new ToolStripStatusLabel("C:--") { ForeColor = Color.Gray };
             _lblMsgCount = new ToolStripStatusLabel("Msg: 0")
             {
                 ForeColor = Color.FromArgb(150, 150, 170),
@@ -180,7 +175,7 @@ namespace App64
             });
             this.Controls.Add(_statusStrip);
 
-            // ── DockPanel (핵심) ──
+            // ── DockPanel (동일) ──
             _dockPanel = new DockPanel
             {
                 Dock = DockStyle.Fill,
@@ -190,7 +185,7 @@ namespace App64
                 AllowEndUserNestedDocking = true
             };
             this.Controls.Add(_dockPanel);
-            _dockPanel.BringToFront(); // MenuStrip, ToolStrip, StatusStrip 뒤에
+            _dockPanel.BringToFront();
 
             // ── Clock Timer ──
             _clockTimer = new Timer { Interval = 1000 };
@@ -269,11 +264,21 @@ namespace App64
 
                 // MarketDataService – 실시간 시세 처리
                 _market = new MarketDataService(_conn);
+                _market.OnLog += msg => BeginInvoke((Action)(() => AppendLog(msg)));
                 _market.OnMarketDataUpdated += md =>
                 {
                     this.BeginInvoke((Action)(() =>
                     {
                         _watchForm?.UpdateMarketData(md);
+
+                        // 열려 있는 차트 폼에도 실시간 데이터 전달
+                        foreach (var content in _dockPanel.Documents)
+                        {
+                            if (content is ChartForm cf && !cf.IsDisposed)
+                                cf.OnMarketDataUpdated(md);
+                            else if (content is MultiChartForm mcf && !mcf.IsDisposed)
+                                mcf.OnMarketDataUpdated(md);
+                        }
                     }));
                 };
 
@@ -373,7 +378,6 @@ namespace App64
                 case MessageTypes.BalancePush:
                     HandleBalancePush(body);
                     break;
-
                 case MessageTypes.ConditionResult:
                     HandleConditionResult(body);
                     break;
@@ -432,6 +436,20 @@ namespace App64
             {
                 string payload = Encoding.UTF8.GetString(body);
                 AppendLog($"[조건검색 결과] 수신 {payload.Length}자");
+
+                // 키움 조건식은 포착 종목을 자동으로 실시간 등록하므로
+                // 수동 구독 전에 미리 등록하여 중복 방지
+                if (_market != null)
+                {
+                    var lines = payload.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                    foreach (var line in lines)
+                    {
+                        var code = line.Split('|')[0].Trim();
+                        if (!string.IsNullOrEmpty(code) && code.Length == 6)
+                            _market.MarkAsConditionAutoSubscribed(code);
+                    }
+                }
+
                 this.BeginInvoke((Action)(() =>
                 {
                     _watchForm?.OnConditionResult(payload);
@@ -450,7 +468,14 @@ namespace App64
                 string payload = Encoding.UTF8.GetString(body);
                 // "CODE|TYPE|NAME|IDX"
                 AppendLog($"[실시간 조건] {payload}");
-                
+
+                // 편입(I) 종목도 키움 자동 실시간 등록
+                var fields = payload.Split('|');
+                if (fields.Length >= 2 && fields[1] == "I" && _market != null)
+                {
+                    _market.MarkAsConditionAutoSubscribed(fields[0].Trim());
+                }
+
                 this.BeginInvoke((Action)(() =>
                 {
                     _watchForm?.OnConditionRealtime(payload);
@@ -523,14 +548,7 @@ namespace App64
                 _btnConnect.Enabled = true;
                 _btnConnect.Text = "연결";
                 _btnOrderTest.Enabled = false;
-                _btnStartSrv.Enabled = false;
-                _btnStopSrv.Enabled = false;
                 AppendLog("Server32 연결이 끊어졌습니다");
-            }
-            else
-            {
-                _btnStartSrv.Enabled = true;
-                _btnStopSrv.Enabled = true;
             }
         }
 
@@ -560,8 +578,54 @@ namespace App64
                 }
             }
 
-            var chart = new ChartForm(stockCode, stockName);
+            var chart = new ChartForm(stockCode, stockName, _candle);
             chart.Show(_dockPanel, DockState.Document);
+
+            // 데이터 비동기 로드
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    AppendLog($"[차트] 데이터 로드 시작: {stockName}({stockCode})");
+                    var candles = await _candle.GetCandlesAsync(stockCode, CandleType.Minute, 1, 300);
+                    
+                    this.BeginInvoke((Action)(() =>
+                    {
+                        if (!chart.IsDisposed)
+                        {
+                            chart.LoadChartData(stockCode, stockName, new List<CandleData>(candles));
+                            AppendLog($"[차트] 데이터 로드 완료: {candles.Count}개");
+                        }
+                    }));
+                }
+                catch (Exception ex)
+                {
+                    AppendLog($"[차트] 데이터 로드 실패: {ex.Message}");
+                }
+            });
+        }
+
+        public async Task ExecuteConditionAsync(int index, string name)
+        {
+            try
+            {
+                AppendLog($"조건검색 실행 요청: {name} ({index})");
+                string resp = await _conn.ExecuteConditionAsync(index, name);
+                
+                if (!string.IsNullOrEmpty(resp))
+                {
+                    AppendLog($"조건검색 결과 수신: {resp.Length}자");
+                    this.BeginInvoke((Action)(() =>
+                    {
+                        ShowOrActivate(ref _watchForm);
+                        _watchForm?.OnConditionResult(resp);
+                    }));
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"조건검색 실행 실패: {ex.Message}");
+            }
         }
 
         public void ShowConditionSearch()
@@ -572,7 +636,7 @@ namespace App64
                 return;
             }
 
-            using (var dlg = new ConditionSearchForm(_conn))
+            using (var dlg = new ConditionSearchForm(this))
             {
                 dlg.ShowDialog(this);
             }
@@ -617,6 +681,43 @@ namespace App64
         }
 
         // ═══════════════════════════════════════════
+        //  잔고 조회 (신규)
+        // ═══════════════════════════════════════════
+        private async Task RequestBalanceAsync()
+        {
+            if (_conn == null || !_conn.IsConnected)
+            {
+                AppendLog("[오류] 서버에 연결되지 않았습니다");
+                return;
+            }
+
+            try
+            {
+                AppendLog("잔고 조회 요청...");
+                var resp = await _conn.RequestAsync(MessageTypes.BalanceRequest, null, 10000);
+
+                if (resp.respType == MessageTypes.BalanceResponse)
+                {
+                    var balances = BinarySerializer.DeserializeBalanceBatch(resp.respBody);
+                    AppendLog($"잔고 수신: {balances.Count}종목");
+
+                    foreach (var b in balances)
+                    {
+                        _portfolioForm?.UpdatePosition(b);
+                    }
+                }
+                else if (resp.respType == MessageTypes.ErrorResponse)
+                {
+                    AppendLog("[오류] " + Encoding.UTF8.GetString(resp.respBody));
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"잔고 조회 실패: {ex.Message}");
+            }
+        }
+
+        // ═══════════════════════════════════════════
         //  헬퍼: 싱글톤 DockContent 표시/활성화
         // ═══════════════════════════════════════════
         private void ShowOrActivate<T>(ref T form) where T : DockContent, new()
@@ -646,6 +747,15 @@ namespace App64
             if (typeof(T) == typeof(WatchForm)) return DockState.DockLeft;
             if (typeof(T) == typeof(PortfolioForm)) return DockState.DockBottom;
             return DockState.Document;
+        }
+
+        // ═══════════════════════════════════════════
+        //  멀티차트 생성
+        // ═══════════════════════════════════════════
+        private void ShowMultiChart()
+        {
+            var mcf = new MultiChartForm(_candle, _order);
+            mcf.Show(_dockPanel, DockState.Document);
         }
 
         // ═══════════════════════════════════════════
