@@ -44,17 +44,53 @@ namespace App64.Services
 
                 var res = _engine.Evaluate(strategy, snapshots, i);
                 
-                // [상태 업데이트] 매수/매도 시그널에 따른 가상 포지션 변화 기록
+                // [상태 업데이트 및 중복 신호 필터링]
+                // 1. 매수 신호: 포지션이 없을 때만 유효 -> 진입
                 if (res.IsBuySignal && !hasPosition)
                 {
                     hasPosition = true;
                     entryPrice = snap.Close;
+                    // res.IsBuySignal = true; // 유지
                 }
-                else if (res.IsSellSignal && hasPosition)
+                else if (res.IsBuySignal && hasPosition)
                 {
+                    // 이미 포지션 보유 중이면 매수 신호 무시 (중복 진입 방지)
+                    res.IsBuySignal = false; 
+                }
+
+                // 2. 매도 신호: 포지션이 있을 때만 유효 -> 청산
+                if (res.IsSellSignal && hasPosition)
+                {
+                    // 매수 신호와 동시 발생 시, 당일 청산은 보수적으로 다음 봉으로 미루거나, 
+                    // 혹은 전략 엔진에서 우선순위를 정했어야 함.
+                    // 여기서는 매수 진입 직후 바로 매도 조건이 뜨면 당일 스캘핑으로 인정.
+                    // 하지만 위 조건문 흐름상, 만약 이번 봉에서 Buy해서 hasPosition=true가 되었다면,
+                    // 바로 아래 로직을 타게 됨. 즉 같은 봉에서 진입/청산 동시 발생 가능.
+                    // 보통은 진입봉에서는 청산 안 함 -> i > entryIndex 체크 필요하나,
+                    // 급변동 시 '진입 후 즉시 손절'도 가능해야 하므로 일단 허용.
+                    // 단, 위에서 Buy로 인해 hasPosition이 true가 된 경우, 이번 턴의 Sell은 무시하는 게 일반적 (다음 봉부터 청산 감시).
+                    // -> entryPrice가 방금 설정되었다면(즉 진입봉이라면) 청산 스킵?
+                    // -> 일단 단순하게 감.
+                    
                     hasPosition = false;
                     entryPrice = 0;
+                    // res.IsSellSignal = true; // 유지
                 }
+                else if (res.IsSellSignal && !hasPosition)
+                {
+                    // 포지션 없는데 매도 신호 -> 무시 (공매도 로직이 아니면)
+                    res.IsSellSignal = false;
+                }
+                
+                // [중요] 같은 봉에서 Buy/Sell 동시 발생 시 처리
+                // 위 로직대로면:
+                // Case A: NoPos -> Buy -> HasPos -> Sell -> NoPos (하루에 사고 팔고)
+                // 현재 구조상 if ... else if가 아니므로 순차 실행됨.
+                // 1. res.Buy && !Pos -> Pos=true.
+                // 2. res.Sell && Pos(방금 됨) -> Pos=false. 
+                // 결과: IsBuy=True, IsSell=True. 마커 둘 다 찍힘. (스캘핑 승인)
+                // 만약 이걸 원치 않으면(진입봉 청산 금지), 별도 flag 필요.
+                // 다만 사용자의 "즉시 손절" 요구사항 등을 고려하면 허용하는 게 맞음.
 
                 results.Add(res);
             }
