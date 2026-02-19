@@ -12,7 +12,7 @@ namespace App64.Services
     /// </summary>
     public static class SnapshotService
     {
-        public static List<MarketSnapshot> CreateSnapshots(List<FastChart.OHLCV> candles, List<FastChart.CustomSeries> indicators, double todayOpen = 0, StrategyDefinition strategy = null)
+        public static List<MarketSnapshot> CreateSnapshots(List<FastChart.OHLCV> candles, List<FastChart.CustomSeries> indicators, double todayOpen = 0, StrategyDefinition strategy = null, List<BarData> externalDailyContext = null)
         {
             if (candles == null || candles.Count == 0) return new List<MarketSnapshot>();
 
@@ -29,11 +29,7 @@ namespace App64.Services
             }
 
             // 2. 일봉 데이터 집계 (Daily Aggregation)
-            Dictionary<int, double> dailyHighMap = null; // DateInt -> Computed High
-            if (dailyHighReqs.Count > 0)
-            {
-                dailyHighMap = ComputeDailyHighs(candles, dailyHighReqs);
-            }
+            // 외부 데이터가 있으면 ComputeAllDailyValues 내부에서 우선 사용됨
 
             var snapshots = new List<MarketSnapshot>();
             
@@ -102,11 +98,11 @@ namespace App64.Services
                     snapshotIndicators
                 ));
             }
-            
+
             // [V2] Post-process to fill daily values
             if (dailyHighReqs.Count > 0)
             {
-                var calculatedValues = ComputeAllDailyValues(candles, dailyHighReqs);
+                var calculatedValues = ComputeAllDailyValues(candles, dailyHighReqs, externalDailyContext);
                 foreach (var snap in snapshots)
                 {
                     int dateKey = GetDateKey(snap.Time);
@@ -139,37 +135,60 @@ namespace App64.Services
 
         private static int GetDateKey(DateTime dt) => dt.Year * 10000 + dt.Month * 100 + dt.Day;
 
-        private static Dictionary<string, Dictionary<int, double>> ComputeAllDailyValues(List<FastChart.OHLCV> candles, List<(string key, int days, int pct)> reqs)
+        private static Dictionary<string, Dictionary<int, double>> ComputeAllDailyValues(List<FastChart.OHLCV> candles, List<(string key, int days, int pct)> reqs, List<BarData> externalDaily = null)
         {
-            // 1. 일봉 차트 생성
+            // 1. 일봉 데이터 준비
             var dailyCandles = new List<DailyCandle>();
-            if (candles.Count == 0) return new Dictionary<string, Dictionary<int, double>>();
 
-            // 분봉 -> 일봉 변환
-            var grouped = candles.GroupBy(c => GetDateKey(c.DateVal)).OrderBy(g => g.Key);
-            
-            DailyCandle prevDaily = null;
-            foreach (var g in grouped)
+            if (externalDaily != null && externalDaily.Count > 0)
             {
-                double o = g.First().Open;
-                double h = g.Max(c => c.High);
-                double l = g.Min(c => c.Low);
-                double c = g.Last().Close;
-                
-                var dc = new DailyCandle { DateKey = g.Key, Open = o, High = h, Low = l, Close = c };
-                
-                // 전일 대비 상승률 계산
-                if (prevDaily != null && prevDaily.Close > 0)
+                // [Case A] 외부 일봉 데이터 사용 (우선순위 높음)
+                DailyCandle prev = null;
+                // 날짜순 정렬 필수
+                foreach (var b in externalDaily.OrderBy(x => x.Time))
                 {
-                    dc.ChangePct = (dc.Close - prevDaily.Close) / prevDaily.Close * 100.0;
+                    var dc = new DailyCandle 
+                    { 
+                        DateKey = GetDateKey(b.Time), 
+                        Open = b.Open, High = b.High, Low = b.Low, Close = b.Close 
+                    };
+                    
+                    if (prev != null && prev.Close > 0) 
+                        dc.ChangePct = (dc.Close - prev.Close) / prev.Close * 100.0;
+                    else 
+                        dc.ChangePct = 0;
+                        
+                    dailyCandles.Add(dc);
+                    prev = dc;
                 }
-                else
-                {
-                    dc.ChangePct = 0; // 첫날은 0
-                }
+            }
+            else if (candles.Count > 0)
+            {
+                // [Case B] 분봉 -> 일봉 변환 (데이터 부족 시 Fallback)
+                var grouped = candles.GroupBy(c => GetDateKey(c.DateVal)).OrderBy(g => g.Key);
                 
-                dailyCandles.Add(dc);
-                prevDaily = dc;
+                DailyCandle prevDaily = null;
+                foreach (var g in grouped)
+                {
+                    double o = g.First().Open;
+                    double h = g.Max(c => c.High);
+                    double l = g.Min(c => c.Low);
+                    double c = g.Last().Close;
+                    
+                    var dc = new DailyCandle { DateKey = g.Key, Open = o, High = h, Low = l, Close = c };
+                    
+                    if (prevDaily != null && prevDaily.Close > 0)
+                    {
+                        dc.ChangePct = (dc.Close - prevDaily.Close) / prevDaily.Close * 100.0;
+                    }
+                    else
+                    {
+                        dc.ChangePct = 0; 
+                    }
+                    
+                    dailyCandles.Add(dc);
+                    prevDaily = dc;
+                }
             }
 
             // 2. 각 요청(Req)별로 값 계산

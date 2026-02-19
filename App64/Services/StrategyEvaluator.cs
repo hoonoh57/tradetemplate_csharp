@@ -17,11 +17,11 @@ namespace App64.Services
         /// <summary>
         /// 전체 데이터셋에 대해 전략을 평가하고 이력(Results)을 생성함.
         /// </summary>
-        public List<EvaluationResult> RunHistorical(StrategyDefinition strategy, List<FastChart.OHLCV> data, List<FastChart.CustomSeries> indicators, double todayOpen = 0)
+        public List<EvaluationResult> RunHistorical(StrategyDefinition strategy, List<FastChart.OHLCV> data, List<FastChart.CustomSeries> indicators, double todayOpen = 0, List<BarData> externalDaily = null)
         {
             if (strategy == null || data == null || data.Count == 0) return new List<EvaluationResult>();
 
-            var snapshots = SnapshotService.CreateSnapshots(data, indicators, todayOpen, strategy);
+            var snapshots = SnapshotService.CreateSnapshots(data, indicators, todayOpen, strategy, externalDaily);
             var results = new List<EvaluationResult>();
 
             // 가상 포지션 상태 추적 (수익률 기반 매도를 위해)

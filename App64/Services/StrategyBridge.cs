@@ -48,13 +48,27 @@ namespace App64.Services
             var buyGate = new LogicGate("EntryGate", LogicalOperator.AND, buyConditions);
             var sellGate = new LogicGate("ExitGate", LogicalOperator.OR, sellConditions);
 
+            // [추가] 필요 데이터 일수 계산
+            int maxDays = 0;
+            var allReqs = buyConditions.Concat(sellConditions).SelectMany(c => new[] { c.IndicatorA, c.IndicatorB }).Where(s => !string.IsNullOrEmpty(s));
+            foreach (var req in allReqs)
+            {
+                // DAILY_HIGH_COND_{days}_{pct}
+                var m = Regex.Match(req, @"DAILY_HIGH_COND_(\d+)_");
+                if (m.Success)
+                {
+                    int d = int.Parse(m.Groups[1].Value);
+                    if (d > maxDays) maxDays = d;
+                }
+            }
+
             return new StrategyDefinition(
                 strategyName,
                 "자연어 해석 전략: " + nlPrompt,
                 new List<LogicGate> { buyGate },
                 new List<LogicGate> { sellGate },
-                nlPrompt // [추가] 원문 프롬프트 저장
-            );
+                nlPrompt 
+            ) { RequiredDataDays = maxDays };
         }
 
         private static List<ConditionCell> ParseConditions(string part, bool isBuy)

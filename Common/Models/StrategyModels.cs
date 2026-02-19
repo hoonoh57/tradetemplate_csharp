@@ -71,13 +71,31 @@ namespace Common.Models
         [DataMember] public string Description { get; set; }
         [DataMember] public List<LogicGate> BuyRules { get; set; }
         [DataMember] public List<LogicGate> SellRules { get; set; }
-        [DataMember] public string NaturalLanguagePrompt { get; set; } // [추가] 원문 자연어 저장
+        [DataMember] public string NaturalLanguagePrompt { get; set; }
+        [DataMember] public int RequiredDataDays { get; set; } = 0; // [추가] 전략 실행에 필요한 최소 일봉 데이터 수
 
         public StrategyDefinition() { BuyRules = new List<LogicGate>(); SellRules = new List<LogicGate>(); }
         public StrategyDefinition(string name, string desc, List<LogicGate> buy, List<LogicGate> sell, string nlPrompt = "")
         {
             Name = name; Description = desc; BuyRules = buy ?? new List<LogicGate>(); SellRules = sell ?? new List<LogicGate>();
             NaturalLanguagePrompt = nlPrompt;
+        }
+    }
+
+    [DataContract]
+    public class BarData
+    {
+        [DataMember] public DateTime Time { get; set; }
+        [DataMember] public double Open { get; set; }
+        [DataMember] public double High { get; set; }
+        [DataMember] public double Low { get; set; }
+        [DataMember] public double Close { get; set; }
+        [DataMember] public double Volume { get; set; }
+
+        public BarData() { }
+        public BarData(DateTime t, double o, double h, double l, double c, double v)
+        {
+            Time = t; Open = o; High = h; Low = l; Close = c; Volume = v;
         }
     }
 

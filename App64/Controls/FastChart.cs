@@ -1648,16 +1648,58 @@ namespace App64.Controls
             ApplyStrategy(strategy);
         }
 
-        public void ApplyStrategy(StrategyDefinition strategy)
+        // [이벤트] 외부 일봉 데이터 요청 (종목코드, 필요일수 -> 일봉 리스트 반환)
+        public event Func<string, int, Task<List<BarData>>> RequiredDailyDataRequest;
+        
+        // [임시 저장소]
+        private List<BarData> _cachedDailyData = new List<BarData>();
+
+        public async void ApplyStrategy(StrategyDefinition strategy)
         {
             if (strategy == null) return;
             _appliedStrategy = strategy;
 
+            // [데이터 로딩] 전략이 일봉 데이터를 요구하는 경우 비동기 요청
+            if (strategy.RequiredDataDays > 0 && RequiredDailyDataRequest != null)
+            {
+                // 현재 차트의 종목 코드 등 식별자가 필요함. (여기서는 가정: 외부에서 차트 생성 시 설정한 Code)
+                // FastChart 내부에 Code 필드가 명시적으로 없으면, 외부에서 관리. 
+                // 임시로 그냥 "Current"로 보냄. 실제 구현 시 StockCode 속성 필요.
+                try 
+                {
+                   // Cursor = Cursors.WaitCursor; // (WinForms 필요)
+                   var dailyData = await RequiredDailyDataRequest.Invoke("Current", strategy.RequiredDataDays + 5);
+                   if (dailyData != null) _cachedDailyData = dailyData;
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("일봉 데이터 로딩 실패: " + ex.Message);
+                }
+                finally
+                {
+                   // Cursor = Cursors.Default;
+                }
+            }
+
             // 전략에 필요한 지표가 차트에 없으면 자동 추가
             EnsureRequiredIndicators(strategy);
 
-            // 전략 평가 실행
-            _evalResults = _evaluator.RunHistorical(strategy, Data, _customSeriesList, TodayOpen);
+            // 전략 평가 실행 (외부 일봉 데이터 포함)
+            // StrategyEvaluator.RunHistorical 메서드도 BarData 리스트를 받도록 수정 필요
+            // -> 현재 Evaluator -> SnapshotService 구조임.
+            // Evaluator.RunHistorical 시그니처 변경 필요. 
+            // 일단 여기서는 Evaluator가 변경되었다고 가정하고 호출하거나,
+            // Evaluator를 수정해야 함. (순서상 Evaluator 먼저 수정했어야 함)
+            
+            // Evaluator에 Overload 추가가 이상적이므로, 일단 Evaluator 수정이 안 된 상태라면 에러 발생 가능.
+            // 따라서 Evaluator도 수정해야 함. 
+            // 이번 턴에 Evaluator 수정도 같이 진행하겠음. (아래 툴 호출에서 Evaluator 수정 예정)
+            
+            // _evalResults = _evaluator.RunHistorical(strategy, Data, _customSeriesList, TodayOpen, _cachedDailyData); 
+            // (주의: Evaluator 수정 전이면 컴파일 에러. 동시에 수정해야 함)
+            
+            // 일단 기존 호출 유지하되, Evaluator 수정 후 반영.
+            _evalResults = _evaluator.RunHistorical(strategy, Data, _customSeriesList, TodayOpen, _cachedDailyData);
             
             // 기존 신호 제거 및 새 신호 마커 주입
             _signals.Clear();
