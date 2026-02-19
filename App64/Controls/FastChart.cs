@@ -1636,8 +1636,13 @@ namespace App64.Controls
                 
                 // 필요한 지표가 없으면 계산하여 추가 (IndicatorCalculation 활용)
                 if (name == "SuperTrend") AddSeries(IndicatorCalculation.CalculateSuperTrend(Data));
-                else if (name == "MA_20") AddSeries(IndicatorCalculation.CalculateMA(Data, 20, SKColors.Yellow));
+                else if (name.StartsWith("MA_"))
+                {
+                    if (int.TryParse(name.Substring(3), out int period))
+                        AddSeries(IndicatorCalculation.CalculateMA(Data, period, SKColors.Yellow));
+                }
                 else if (name == "TICK_RAT") { _showTickIntensity = true; BuildTickIntensitySeries(); }
+                else if (name == "CHG_OPEN_PCT") continue; // 가상 지표는 SnapshotService에서 즉석 계산됨
             }
         }
     }

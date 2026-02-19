@@ -1,86 +1,141 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Text.RegularExpressions;
 using Common.Models;
 
 namespace App64.Services
 {
     /// <summary>
-    /// 사용자님의 자연어 요구사항을 '원자적 조건'과 '논리 게이트'로 정밀하게 맵핑해주는 브릿지.
-    /// 코딩 없이 로직을 조립하는 '자유로운 선순환 구조'의 핵심 창구 역할을 수행합니다.
+    /// 사용자님의 자유로운 자연어를 정밀한 기술적 논리로 해석하는 지능형 브릿지.
+    /// 정규표현식(Regex)과 키워드 매핑을 결합하여 '그냥 말하는 대로' 전략을 설계합니다.
     /// </summary>
     public static class StrategyBridge
     {
         public static StrategyDefinition CreateFromNaturalLanguage(string nlPrompt)
         {
-            // [비전 실현] 사용자가 자연어로 주문한 "상승전환 + 강세 확인 -> 매수 / 이평이탈 -> 매도(추세고려)" 로직 구현
             if (string.IsNullOrEmpty(nlPrompt)) return null;
 
-            if (nlPrompt.Contains("상환") || nlPrompt.Contains("상승전환") || nlPrompt.Contains("강세"))
+            // 1. 매수(진입)와 매도(청산) 섹션 분리
+            string buyPart = "";
+            string sellPart = "";
+
+            var splitBuy = Regex.Split(nlPrompt, "매수|진행|진입", RegexOptions.IgnoreCase);
+            if (splitBuy.Length > 1)
             {
-                // 1. 원자적 조건(Condition Cells) 설계
-                // 3계층 이하로 유지하며, 단순한 요소의 선택과 파라미터만으로 동작하도록 구성
-                
-                var condTrendUp = new ConditionCell(
-                    id: "C_TREND_UP", 
-                    desc: "추세 상승 전환 (Price CrossUp SuperTrend)", 
-                    indicatorA: "Price", 
-                    op: ComparisonOperator.CrossUp, 
-                    indicatorB: "SuperTrend"
-                );
-
-                var condTickStrong = new ConditionCell(
-                    id: "C_TICK_STRONG", 
-                    desc: "틱강도 강세 (TickRate > 5.0)", 
-                    indicatorA: "TICK_RAT", 
-                    op: ComparisonOperator.GreaterThan, 
-                    constantValue: 5.0
-                );
-
-                var condMaExit = new ConditionCell(
-                    id: "C_MA_EXIT", 
-                    desc: "20이평 하향 이탈 (Price CrossDown MA_20)", 
-                    indicatorA: "Price", 
-                    op: ComparisonOperator.CrossDown, 
-                    indicatorB: "MA_20"
-                );
-
-                var condTrendAlive = new ConditionCell(
-                    id: "C_TREND_ALIVE", 
-                    desc: "추세 유지 중 (Price > SuperTrend)", 
-                    indicatorA: "Price", 
-                    op: ComparisonOperator.GreaterThan, 
-                    indicatorB: "SuperTrend"
-                );
-
-                // 2. 논리 게이트(Logic Gates) 조립
-                // "1분봉 상승전환 AND 시장 강세" -> 매수 실행
-                var buyGate = new LogicGate(
-                    name: "Strategy_Entry", 
-                    op: LogicalOperator.AND, 
-                    conditions: new List<ConditionCell> { condTrendUp, condTickStrong }
-                );
-
-                // "20이평 하향 돌파 AND NOT(추세 살아있음)" -> 매도 실행
-                // "추세가 살아있으면 매도를 자제"라는 사용자 철학을 논리 게이트에 정밀 투영함
-                var sellGate = new LogicGate(
-                    name: "Strategy_Exit", 
-                    op: LogicalOperator.AND, 
-                    conditions: new List<ConditionCell> { 
-                        condMaExit, 
-                        // Inverted: true -> NOT (Price > SuperTrend)
-                        new ConditionCell("C_TREND_DEAD", "추세 이탈 확인", "Price", ComparisonOperator.GreaterThan, "SuperTrend", null, true, true) 
-                    }
-                );
-
-                return new StrategyDefinition(
-                    name: "UltraTrend_V1",
-                    desc: "자연어 기반 커스텀 전략: " + nlPrompt,
-                    buy: new List<LogicGate> { buyGate },
-                    sell: new List<LogicGate> { sellGate }
-                );
+                buyPart = splitBuy[0];
+                var nextPart = splitBuy[1];
+                var splitSell = Regex.Split(nextPart, "매도|청산|탈출", RegexOptions.IgnoreCase);
+                if (splitSell.Length > 1) { sellPart = splitSell[0]; } // 매수 뒤에 오는 매도 조건
+                else { sellPart = nextPart; } // 매수 설명 이후 나머지가 매도일 가능성
+            }
+            else
+            {
+                // 구분자가 명확하지 않으면 쉼표로 분리 시도
+                var clauses = nlPrompt.Split(',', '.');
+                buyPart = clauses[0];
+                if (clauses.Length > 1) sellPart = string.Join(",", clauses.Skip(1));
             }
 
-            return null;
+            // 2. 조건 추출 및 변환
+            var buyConditions = ParseConditions(buyPart, true);
+            var sellConditions = ParseConditions(sellPart, false);
+
+            if (buyConditions.Count == 0 && sellConditions.Count == 0) return null;
+
+            // 3. 전략 조립
+            string strategyName = "AI_Custom_" + DateTime.Now.ToString("HHmmss");
+            var buyGate = new LogicGate("EntryGate", LogicalOperator.AND, buyConditions);
+            var sellGate = new LogicGate("ExitGate", LogicalOperator.OR, sellConditions);
+
+            return new StrategyDefinition(
+                strategyName,
+                "자연어 해석 전략: " + nlPrompt,
+                new List<LogicGate> { buyGate },
+                new List<LogicGate> { sellGate }
+            );
+        }
+
+        private static List<ConditionCell> ParseConditions(string part, bool isBuy)
+        {
+            var results = new List<ConditionCell>();
+            if (string.IsNullOrWhiteSpace(part)) return results;
+
+            int condId = 1;
+
+            // 패턴 1: 시가대비 X% 돌파/이상/하락
+            var mOpen = Regex.Match(part, @"시가대비\s*(\d+(\.\d+)?)\s*%?\s*(상승|하락)?\s*(돌파|이상|이하|초과|미만)");
+            if (mOpen.Success)
+            {
+                double val = double.Parse(mOpen.Groups[1].Value);
+                if (mOpen.Groups[3].Value == "하락") val = -val;
+                
+                string opStr = mOpen.Groups[4].Value;
+                var op = MapOperator(opStr);
+                
+                results.Add(new ConditionCell($"B{condId++}", $"시가대비 {val}% {opStr}", "CHG_OPEN_PCT", op, null, val));
+            }
+
+            // 패턴 2: 틱강도 X 이상/돌파
+            var mTick = Regex.Match(part, @"(틱강도|체결강도)\s*(\w+)?\s*가?\s*(\d+(\.\d+)?)\s*(이상|돌파|초과)");
+            if (mTick.Success)
+            {
+                double val = double.Parse(mTick.Groups[3].Value);
+                results.Add(new ConditionCell($"B{condId++}", $"틱강도 {val} {mTick.Groups[5].Value}", "TICK_RAT", MapOperator(mTick.Groups[5].Value), null, val));
+            }
+
+            // 패턴 3: SuperTrend 상승/하락 추세
+            if (part.Contains("supertrend") || part.Contains("슈퍼트렌드"))
+            {
+                if (part.Contains("상승추세") || part.Contains("위") || (isBuy && part.Contains("돌파")))
+                {
+                    results.Add(new ConditionCell($"B{condId++}", "SuperTrend 상승 유지", "Price", ComparisonOperator.GreaterThan, "SuperTrend"));
+                }
+                else if (part.Contains("하락추세") || part.Contains("아래") || (!isBuy && part.Contains("이탈")))
+                {
+                    results.Add(new ConditionCell($"B{condId++}", "SuperTrend 하락 유지", "Price", ComparisonOperator.LessThan, "SuperTrend"));
+                }
+            }
+
+            // 패턴 4: 단순 수익률 매도 (9% 상승하면 매도 등)
+            if (!isBuy)
+            {
+                var mPctRange = Regex.Match(part, @"(\d+(\.\d+)?)\s*%?\s*(상승|하락)?\s*(하면|시)");
+                if (mPctRange.Success)
+                {
+                    double val = double.Parse(mPctRange.Groups[1].Value);
+                    if (mPctRange.Groups[3].Value == "하락")
+                    {
+                         results.Add(new ConditionCell($"B{condId++}", $"시가대비 {val}% 하락 매도", "CHG_OPEN_PCT", ComparisonOperator.LessThanOrEqual, null, -val));
+                    }
+                    else
+                    {
+                         results.Add(new ConditionCell($"B{condId++}", $"시가대비 {val}% 상승 매도", "CHG_OPEN_PCT", ComparisonOperator.GreaterThanOrEqual, null, val));
+                    }
+                }
+            }
+
+            // 패턴 5: 이평선 돌파/이탈
+            var mMa = Regex.Match(part, @"(\d+)\s*(이평|MA|이동평균선)\s*(돌파|이탈|상향)");
+            if (mMa.Success)
+            {
+                string period = mMa.Groups[1].Value;
+                string maName = "MA_" + period;
+                string act = mMa.Groups[3].Value;
+                var op = (act == "이탈") ? ComparisonOperator.CrossDown : ComparisonOperator.CrossUp;
+                results.Add(new ConditionCell($"B{condId++}", $"{period}이평 {act}", "Price", op, maName));
+            }
+
+            return results;
+        }
+
+        private static ComparisonOperator MapOperator(string text)
+        {
+            if (text.Contains("돌파") || text.Contains("상향")) return ComparisonOperator.CrossUp;
+            if (text.Contains("이탈") || text.Contains("하향")) return ComparisonOperator.CrossDown;
+            if (text.Contains("이상") || text.Contains("초과")) return ComparisonOperator.GreaterThanOrEqual;
+            if (text.Contains("이하") || text.Contains("미만")) return ComparisonOperator.LessThanOrEqual;
+            return ComparisonOperator.GreaterThan;
         }
     }
 }

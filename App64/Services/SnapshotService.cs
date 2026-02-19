@@ -44,6 +44,10 @@ namespace App64.Services
                     }
                 }
 
+                // [가상 지표] 시가 대비 등락율 (%) 추가
+                double openChg = candle.Open > 0 ? (candle.Close - candle.Open) / candle.Open * 100.0 : 0;
+                snapshotIndicators["CHG_OPEN_PCT"] = openChg;
+
                 snapshots.Add(new MarketSnapshot(
                     candle.DateVal,
                     candle.Close,
