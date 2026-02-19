@@ -139,14 +139,14 @@ namespace App64.Services
             else if (candles.Count > 0)
             {
                 // [Case B] 분봉 -> 일봉 변환 (데이터 부족 시 Fallback)
-                var grouped = candles.GroupBy(c => GetDateKey(c.DateVal)).OrderBy(g => g.Key);
+                var grouped = candles.GroupBy(x => GetDateKey(x.DateVal)).OrderBy(g => g.Key);
                 
                 DailyCandle prevDaily = null;
                 foreach (var g in grouped)
                 {
                     double o = g.First().Open;
-                    double h = g.Max(c => c.High);
-                    double l = g.Min(c => c.Low);
+                    double h = g.Max(x => x.High);
+                    double l = g.Min(x => x.Low);
                     double c = g.Last().Close;
                     
                     var dc = new DailyCandle { DateKey = g.Key, Open = o, High = h, Low = l, Close = c };
