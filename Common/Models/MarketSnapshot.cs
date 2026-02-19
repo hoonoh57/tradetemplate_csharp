@@ -11,6 +11,7 @@ namespace Common.Models
     {
         public DateTime Time { get; }
         public double Price { get; }
+        public double Close => Price; // [추가] 종가 별칭 (컴파일 오류 해결 및 가독성)
         public double Open { get; }
         public double High { get; }
         public double Low { get; }
