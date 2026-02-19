@@ -458,12 +458,12 @@ namespace App64.Controls
             ChartMenu.Items.Add(miViLine);
 
             ChartMenu.Items.Add(new ToolStripSeparator());
-            ChartMenu.Items.Add("자연어 기반 전략 설정...", null, (s, e) => {
-                using (var f = new PromptForm("자연어 전략 입력", "1분봉 상승전환 + 시장 강세 시 매수, 20이평 이탈 시 매도 단 추세 유지 시 자제")) {
-                    if (f.ShowDialog() == DialogResult.OK) {
-                        ApplyStrategyFromNL(f.ResultText);
-                    }
-                }
+            ChartMenu.Items.Add(new ToolStripSeparator());
+            ChartMenu.Items.Add("전략 관리자 (AI 설계 비서)...", null, (s, e) => {
+                var f = new StrategyManagerForm((strategy) => {
+                    ApplyStrategy(strategy);
+                });
+                f.ShowDialog();
             });
 
             ChartMenu.Items.Add(new ToolStripSeparator());
@@ -1596,7 +1596,12 @@ namespace App64.Controls
         {
             var strategy = StrategyBridge.CreateFromNaturalLanguage(nlPrompt);
             if (strategy == null) { MessageBox.Show("전략 해석 실패"); return; }
+            ApplyStrategy(strategy);
+        }
 
+        public void ApplyStrategy(StrategyDefinition strategy)
+        {
+            if (strategy == null) return;
             _appliedStrategy = strategy;
 
             // 전략에 필요한 지표가 차트에 없으면 자동 추가
