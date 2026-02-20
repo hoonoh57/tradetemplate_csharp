@@ -27,7 +27,7 @@ namespace App64.Agents
             _weights["SectorStrength"] = 1.0;
         }
 
-        public override AgentResult Analyze(List<FastChart.OHLCV> data, int currentIndex, string stockCode = "")
+        public override AgentResult Analyze(List<FastChart.OHLCV> data, int currentIndex, string stockCode = "", List<FastChart.CustomSeries> indicators = null)
         {
             // 섹터 정보가 없으면 중립 점수 반환
             if (string.IsNullOrEmpty(stockCode) || !SectorMap.Any()) 

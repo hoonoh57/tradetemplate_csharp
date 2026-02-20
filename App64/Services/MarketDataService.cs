@@ -66,14 +66,6 @@ namespace App64.Services
 
             lock (_subLock)
             {
-                // 조건식 자동구독 종목이면 수동 구독 생략
-                if (_conditionAutoSubs.Contains(code))
-                {
-                    OnLog?.Invoke($"[실시간] 조건식 자동구독 종목 → 수동 구독 스킵: {code}");
-                    _subscribedCodes.Add(code); // 추적 목록에는 등록
-                    return;
-                }
-
                 if (_subscribedCodes.Contains(code))
                 {
                     OnLog?.Invoke($"[실시간] 중복 구독 스킵: {code} (이미 구독 중, 총 {_subscribedCodes.Count}개)");
@@ -119,9 +111,8 @@ namespace App64.Services
         }
 
         /// <summary>
-        /// 조건검색으로 자동 구독된 종목을 등록 (수동 구독 방지용).
-        /// 키움 조건식 SendCondition 호출 시 포착된 종목은 자동으로 실시간 등록되므로,
-        /// 여기에 등록하면 SubscribeAsync에서 중복 구독을 방지합니다.
+        /// 조건검색으로 자동 구독된 종목을 등록.
+        /// (현재는 중복 방지 용도로만 사용하며, 실제 시세 구독은 별도로 수행함)
         /// </summary>
         public void MarkAsConditionAutoSubscribed(string code)
         {
@@ -129,9 +120,8 @@ namespace App64.Services
             lock (_subLock)
             {
                 _conditionAutoSubs.Add(code);
-                _subscribedCodes.Add(code);
             }
-            OnLog?.Invoke($"[실시간] 조건식 자동구독 등록: {code} (총 {_subscribedCodes.Count}개)");
+            // OnLog?.Invoke($"[실시간] 조건식 자동구독 마킹: {code}");
         }
 
         public MarketData GetLastData(string code)

@@ -10,7 +10,8 @@ namespace App64.Agents
         SupportResistance,
         SectorAnalysis,
         ReferenceBar,
-        PatternRecognition
+        PatternRecognition,
+        IndicatorAnalysis
     }
 
     /// <summary>
@@ -48,12 +49,13 @@ namespace App64.Agents
         public abstract string Name { get; }
         
         // 에이전트 내부 가중치 (학습에 의해 조정됨)
+        public Dictionary<string, double> Weights => _weights;
         protected Dictionary<string, double> _weights = new Dictionary<string, double>();
 
         /// <summary>
         /// 주어진 시점의 데이터를 분석하여 점수를 반환합니다.
         /// </summary>
-        public abstract AgentResult Analyze(List<FastChart.OHLCV> data, int currentIndex, string stockCode = "");
+        public abstract AgentResult Analyze(List<FastChart.OHLCV> data, int currentIndex, string stockCode = "", List<FastChart.CustomSeries> indicators = null);
 
         /// <summary>
         /// 매매 결과를 바탕으로 내부 가중치를 조정(학습)합니다.

@@ -30,7 +30,8 @@ namespace App64.Forms
 
             _chart = new Controls.FastChart
             {
-                Dock = DockStyle.Fill
+                Dock = DockStyle.Fill,
+                StockCode = stockCode
             };
             _chart.IndicatorAddRequested += OnIndicatorAddRequested;
             _chart.IndicatorSettingsRequested += (s, e) => {

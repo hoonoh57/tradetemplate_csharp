@@ -25,6 +25,7 @@ namespace App64.Forms
         private readonly List<string> _allCodes = new List<string>();
         private readonly Dictionary<string, (string name, string price)> _initialData = new Dictionary<string, (string, string)>();
         private readonly Dictionary<string, MarketData> _marketDataMap = new Dictionary<string, MarketData>();
+        private readonly Dictionary<string, string> _stockNameMap = new Dictionary<string, string>(); // 코드 -> 종목명 매핑 캐시
 
         // 종목별 체결건수 추적용
         private class TickTracker
@@ -65,6 +66,8 @@ namespace App64.Forms
             _grid.AddColumn("TickRat",  "틱비율",   70);
             _grid.AddColumn("VIPrice",  "VI가격",   80);
             _grid.AddColumn("VIDist",   "VI%",      60);
+            _grid.AddColumn("Score",    "점수",     60);
+            _grid.AddColumn("Rank",     "순위",     50);
             _grid.AddColumn("Signal",   "신호",     50);
 
             _grid.CellValueNeeded += (s, e) => { /* virtual mode not used here yet */ };
@@ -190,6 +193,7 @@ namespace App64.Forms
 
                 _allCodes.Add(code);
                 _initialData[code] = (name, price);
+                _stockNameMap[code] = name; // 이름 캐시 업데이트
 
                 // 실시간 등록
                 _ = _mainForm?.SubscribeRealtimeAsync(code);
@@ -207,20 +211,24 @@ namespace App64.Forms
             }
 
             var fields = payload.Split('|');
-            if (fields.Length < 4) return;
+            if (fields.Length < 2) return;
 
             string code = fields[0];
             string type = fields[1]; // "I": 편입, "D": 이탈
-            string name = fields[2];
+            string conditionName = fields.Length > 2 ? fields[2] : "";
 
             if (type == "I")
             {
-                    if (!_allCodes.Contains(code))
-                    {
-                        _allCodes.Add(code);
-                        _initialData[code] = (name, "0");
-                        RefreshGrid();
-                        _ = _mainForm?.SubscribeRealtimeAsync(code);
+                if (!_allCodes.Contains(code))
+                {
+                    _allCodes.Add(code);
+                    
+                    // 이름 결정: 캐시에 있으면 사용, 없으면 코드로 표시 (조건명 사용 안함)
+                    string displayName = _stockNameMap.TryGetValue(code, out var cachedName) ? cachedName : code;
+                    _initialData[code] = (displayName, "0");
+                    
+                    RefreshGrid();
+                    _ = _mainForm?.SubscribeRealtimeAsync(code);
                 }
             }
             else if (type == "D")
@@ -323,8 +331,16 @@ namespace App64.Forms
                 _grid.UpdateRow(rowIdx, "VIDist", viDist.ToString("F1") + "%");
             }
 
-            // 신호: 체결건수 > 10 AND 틱비율 > 50%
-            if (tracker.CurrentBarTicks > 10 && tickRatio > 50)
+            // [지능형 에이전트 연동] 점수 및 순위 표시
+            var agent = App64.Agents.CoordinatorAgent.Instance;
+            double score = agent.GetScore(md.Code);
+            int rank = agent.GetRank(md.Code);
+
+            _grid.UpdateRow(rowIdx, "Score", score.ToString("F1"));
+            _grid.UpdateRow(rowIdx, "Rank", rank > 0 ? rank.ToString() : "-");
+
+            // 신호: 체결건수 > 10 AND 틱비율 > 50% AND 에이전트 점수 > 70
+            if (tracker.CurrentBarTicks > 10 && tickRatio > 50 && score > 70)
                 _grid.UpdateRow(rowIdx, "Signal", "★");
             else
                 _grid.UpdateRow(rowIdx, "Signal", "");

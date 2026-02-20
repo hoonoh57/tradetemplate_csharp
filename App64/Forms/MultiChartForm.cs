@@ -177,6 +177,7 @@ namespace App64.Forms
             {
                 StockCode = code;
                 StockName = name;
+                Chart.StockCode = code;
                 UpdateTitle();
                 SetSignal(false); // 종목 변경 시 신호 초기화
             }

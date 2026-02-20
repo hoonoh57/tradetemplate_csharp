@@ -12,10 +12,10 @@ namespace App64.Services
     /// </summary>
     public static class SnapshotService
     {
-        public static List<MarketSnapshot> CreateSnapshots(List<FastChart.OHLCV> candles, List<FastChart.CustomSeries> indicators, double todayOpen = 0, StrategyDefinition strategy = null, List<BarData> externalDailyContext = null)
+        public static List<MarketSnapshot> CreateSnapshots(string stockCode, List<FastChart.OHLCV> candles, List<FastChart.CustomSeries> indicators, double todayOpen = 0, StrategyDefinition strategy = null, List<BarData> externalDailyContext = null)
         {
             if (candles == null || candles.Count == 0) return new List<MarketSnapshot>();
-
+            
             // 1. 필요한 가상 지표 추출 (DAILY_HIGH_COND_{days}_{pct})
             var dailyHighReqs = new List<(string key, int days, int pct)>();
             if (strategy != null)
@@ -63,6 +63,7 @@ namespace App64.Services
                 snapshotIndicators["PROFIT_PCT"] = 0.0; 
 
                 snapshots.Add(new MarketSnapshot(
+                    stockCode,
                     candle.DateVal,
                     candle.Close,
                     candle.Open,

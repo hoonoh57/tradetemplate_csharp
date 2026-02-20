@@ -24,7 +24,7 @@ namespace App64.Agents
             _weights["ResistanceRejection"] = 0.8;
         }
 
-        public override AgentResult Analyze(List<FastChart.OHLCV> data, int currentIndex, string stockCode = "")
+        public override AgentResult Analyze(List<FastChart.OHLCV> data, int currentIndex, string stockCode = "", List<FastChart.CustomSeries> indicators = null)
         {
             if (currentIndex < 20) return new AgentResult { Agent = Type, Score = 50 }; // 데이터 부족
 

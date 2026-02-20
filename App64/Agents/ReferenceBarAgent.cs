@@ -23,7 +23,7 @@ namespace App64.Agents
             _weights["ResistanceBreakout"] = 1.5; // 매물대 상단 돌파 (가점)
         }
 
-        public override AgentResult Analyze(List<FastChart.OHLCV> data, int currentIndex, string stockCode = "")
+        public override AgentResult Analyze(List<FastChart.OHLCV> data, int currentIndex, string stockCode = "", List<FastChart.CustomSeries> indicators = null)
         {
             if (currentIndex < 20) return new AgentResult { Agent = Type, Score = 50 };
 

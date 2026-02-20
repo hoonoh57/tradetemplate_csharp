@@ -89,6 +89,14 @@
     <Compile Include="Services\StrategyEvaluator.cs" />
     <Compile Include="Services\SnapshotService.cs" />
     <Compile Include="Services\StrategyPersistenceService.cs" />
+    <Compile Include="Services\AgentSystem.cs" />
+    <Compile Include="Services\AgentManager.cs" />
+    <!-- Agents -->
+    <Compile Include="Agents\SupportResistanceAgent.cs" />
+    <Compile Include="Agents\SectorAnalysisAgent.cs" />
+    <Compile Include="Agents\ReferenceBarAgent.cs" />
+    <Compile Include="Agents\IndicatorAnalysisAgent.cs" />
+    <Compile Include="Agents\CoordinatorAgent.cs" />
     <!-- Forms (신규) -->
     <Compile Include="Forms\LogForm.cs">
       <SubType>Form</SubType>

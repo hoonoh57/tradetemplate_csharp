@@ -9,6 +9,7 @@ namespace Common.Models
     /// </summary>
     public sealed class MarketSnapshot
     {
+        public string Code { get; }
         public DateTime Time { get; }
         public double Price { get; }
         public double Close => Price; // [추가] 종가 별칭 (컴파일 오류 해결 및 가독성)
@@ -20,8 +21,9 @@ namespace Common.Models
         // 지표 이름 -> 값 매핑 (예: "SMA20" -> 5550.0, "SuperTrend" -> 5400.0)
         public Dictionary<string, double> Indicators { get; }
 
-        public MarketSnapshot(DateTime time, double price, double o, double h, double l, double v, Dictionary<string, double> indicators)
+        public MarketSnapshot(string code, DateTime time, double price, double o, double h, double l, double v, Dictionary<string, double> indicators)
         {
+            Code = code;
             Time = time;
             Price = price;
             Open = o;

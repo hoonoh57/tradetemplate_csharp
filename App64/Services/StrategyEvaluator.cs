@@ -17,11 +17,11 @@ namespace App64.Services
         /// <summary>
         /// 전체 데이터셋에 대해 전략을 평가하고 이력(Results)을 생성함.
         /// </summary>
-        public List<EvaluationResult> RunHistorical(StrategyDefinition strategy, List<FastChart.OHLCV> data, List<FastChart.CustomSeries> indicators, double todayOpen = 0, List<BarData> externalDaily = null)
+        public List<EvaluationResult> RunHistorical(string stockCode, StrategyDefinition strategy, List<FastChart.OHLCV> data, List<FastChart.CustomSeries> indicators, double todayOpen = 0, List<BarData> externalDaily = null)
         {
             if (strategy == null || data == null || data.Count == 0) return new List<EvaluationResult>();
 
-            var snapshots = SnapshotService.CreateSnapshots(data, indicators, todayOpen, strategy, externalDaily);
+            var snapshots = SnapshotService.CreateSnapshots(stockCode, data, indicators, todayOpen, strategy, externalDaily);
             var results = new List<EvaluationResult>();
 
             // 가상 포지션 상태 추적 (수익률 기반 매도를 위해)
@@ -42,27 +42,19 @@ namespace App64.Services
                     snap.SetIndicator("PROFIT_PCT", 0.0);
                 }
 
-                }
-
                 // [지능형 에이전트 분석 및 점수 주입]
-                // 3개 에이전트의 가중 합산 점수 계산 (Data 부족 시 50점 중립)
                 double agentScore = 50.0;
                 if (i >= 20)
                 {
-                    // 에이전트 인스턴스 (실제로는 DI나 외부 주입이 좋으나, 여기선 직접 생성/사용)
-                    // 성능 최적화를 위해 루프 밖에서 생성하는 것이 좋음 -> 리팩토링 대상
-                    // 현재 구조상 간단히 메서드 내에서 처리
-                    
-                    var srAgent = new App64.Agents.SupportResistanceAgent();
-                    var sectorAgent = new App64.Agents.SectorAnalysisAgent(); // 섹터 정보 주입 필요
-                    var refAgent = new App64.Agents.ReferenceBarAgent();
+                    // AgentManager를 통해 통합 분석 (Coordinator의 가중치 적용됨)
+                    var analysis = App64.Services.AgentManager.Instance.Analyze(snap.Code, data, i, indicators);
+                    agentScore = analysis.FinalScore;
 
-                    var srResult = srAgent.Analyze(data, i);
-                    var refResult = refAgent.Analyze(data, i);
-                    // 섹터 에이전트는 외부 데이터가 없으므로 기본 점수(50) 반환 예상
-
-                    // 가중치 적용 (지지/저항 40%, 기준봉 40%, 섹터 20%)
-                    agentScore = (srResult.Score * 0.4) + (refResult.Score * 0.4) + (50 * 0.2);
+                    // 개별 에이전트 점수도 지표로 주입 (차트 시각화 및 디버깅용)
+                    foreach (var detail in analysis.Details)
+                    {
+                        snap.SetIndicator($"AGENT_{detail.Agent}", detail.Score);
+                    }
                 }
                 
                 snap.SetIndicator("AGENT_SCORE", agentScore);
