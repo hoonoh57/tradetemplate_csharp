@@ -142,10 +142,23 @@ namespace App64.Services
                 if (mPctRange.Success)
                 {
                     double val = double.Parse(mPctRange.Groups[1].Value);
-                    if (mPctRange.Groups[3].Value == "하락")
-                         results.Add(new ConditionCell($"B{condId++}", $"시가대비 {val}% 하락 매도", "CHG_OPEN_PCT", ComparisonOperator.LessThanOrEqual, null, -val));
+                    // [수정] "추가로", "수익률", "진입대비" 키워드가 있으면 PROFIT_PCT로 해석
+                    bool isProfitTarget = part.Contains("추가") || part.Contains("수익") || part.Contains("진입");
+                    
+                    if (isProfitTarget)
+                    {
+                        // 익절 (상승 시)
+                        if (mPctRange.Groups[3].Value != "하락")
+                             results.Add(new ConditionCell($"B{condId++}", $"목표 수익률 ({val}%)", "PROFIT_PCT", ComparisonOperator.GreaterThanOrEqual, null, val));
+                    }
                     else
-                         results.Add(new ConditionCell($"B{condId++}", $"시가대비 {val}% 상승 매도", "CHG_OPEN_PCT", ComparisonOperator.GreaterThanOrEqual, null, val));
+                    {
+                        // 기존: 시가 대비 등락
+                        if (mPctRange.Groups[3].Value == "하락")
+                             results.Add(new ConditionCell($"B{condId++}", $"시가대비 {val}% 하락 매도", "CHG_OPEN_PCT", ComparisonOperator.LessThanOrEqual, null, -val));
+                        else
+                             results.Add(new ConditionCell($"B{condId++}", $"시가대비 {val}% 상승 매도", "CHG_OPEN_PCT", ComparisonOperator.GreaterThanOrEqual, null, val));
+                    }
                 }
             }
 

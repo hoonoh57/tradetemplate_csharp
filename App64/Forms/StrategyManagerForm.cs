@@ -47,12 +47,13 @@ namespace App64.Forms
             this.BackColor = Color.FromArgb(28, 28, 38);
             this.ForeColor = Color.White;
 
-            var mainSplit = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Vertical, SplitterDistance = 250 };
+            var mainSplit = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Vertical, SplitterDistance = 180 };
             var rightSplit = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal, SplitterDistance = 400 };
 
             // --- 왼쪽: 전략 리스트 ---
             var leftPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(10) };
-            _lstStrategies = new ListBox { Dock = DockStyle.Fill, BackColor = Color.FromArgb(40, 40, 50), ForeColor = Color.White, BorderStyle = BorderStyle.None, Font = new Font("맑은 고딕", 10) };
+            _lstStrategies = new ListBox { Dock = DockStyle.Fill, BackColor = Color.FromArgb(40, 40, 50), ForeColor = Color.White, BorderStyle = BorderStyle.None, Font = new Font("맑은 고딕", 10), DrawMode = DrawMode.OwnerDrawFixed, ItemHeight = 35 };
+            _lstStrategies.DrawItem += _lstStrategies_DrawItem;
             _lstStrategies.SelectedIndexChanged += (s, e) => ShowSelectedStrategy();
             
             var btnAdd = new Button { Text = "새 전략", Dock = DockStyle.Bottom, Height = 35, FlatStyle = FlatStyle.Flat };
@@ -77,6 +78,13 @@ namespace App64.Forms
             _txtPrompt = new TextBox { Dock = DockStyle.Fill, Multiline = true, BackColor = Color.FromArgb(45, 45, 55), ForeColor = Color.White, BorderStyle = BorderStyle.FixedSingle };
             var btnSend = new Button { Text = "AI 설계 요청", Dock = DockStyle.Right, Width = 100, BackColor = Color.FromArgb(60, 100, 60), FlatStyle = FlatStyle.Flat };
             btnSend.Click += (s, e) => RequestAIDesign();
+
+            // [추가] 실시간 문법 힌트/검증
+            _txtPrompt.TextChanged += (s, e) => {
+                string t = _txtPrompt.Text;
+                if (t.Contains("상승") || t.Contains("돌파") || t.Contains("이탈")) _txtPrompt.ForeColor = Color.Cyan;
+                else _txtPrompt.ForeColor = Color.White;
+            };
 
             promptContainer.Controls.Add(_txtPrompt);
             promptContainer.Controls.Add(btnSend);
@@ -183,6 +191,27 @@ namespace App64.Forms
                     break;
                 }
             }
+        }
+
+        private void _lstStrategies_DrawItem(object sender, DrawItemEventArgs e)
+        {
+            if (e.Index < 0) return;
+
+            e.DrawBackground();
+            bool isSelected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
+            
+            var brush = isSelected ? new SolidBrush(Color.FromArgb(100, 60, 100)) : new SolidBrush(Color.FromArgb(40, 40, 50));
+            e.Graphics.FillRectangle(brush, e.Bounds);
+
+            var text = _lstStrategies.Items[e.Index].ToString();
+            var font = _lstStrategies.Font;
+            var textBrush = isSelected ? Brushes.Yellow : Brushes.White;
+            
+            var stringSize = e.Graphics.MeasureString(text, font);
+            float y = e.Bounds.Y + (e.Bounds.Height - stringSize.Height) / 2;
+            
+            e.Graphics.DrawString(text, font, textBrush, e.Bounds.X + 5, y);
+            e.DrawFocusRectangle();
         }
 
         private void LogChat(string msg)
