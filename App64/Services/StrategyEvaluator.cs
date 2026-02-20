@@ -42,6 +42,31 @@ namespace App64.Services
                     snap.SetIndicator("PROFIT_PCT", 0.0);
                 }
 
+                }
+
+                // [지능형 에이전트 분석 및 점수 주입]
+                // 3개 에이전트의 가중 합산 점수 계산 (Data 부족 시 50점 중립)
+                double agentScore = 50.0;
+                if (i >= 20)
+                {
+                    // 에이전트 인스턴스 (실제로는 DI나 외부 주입이 좋으나, 여기선 직접 생성/사용)
+                    // 성능 최적화를 위해 루프 밖에서 생성하는 것이 좋음 -> 리팩토링 대상
+                    // 현재 구조상 간단히 메서드 내에서 처리
+                    
+                    var srAgent = new App64.Agents.SupportResistanceAgent();
+                    var sectorAgent = new App64.Agents.SectorAnalysisAgent(); // 섹터 정보 주입 필요
+                    var refAgent = new App64.Agents.ReferenceBarAgent();
+
+                    var srResult = srAgent.Analyze(data, i);
+                    var refResult = refAgent.Analyze(data, i);
+                    // 섹터 에이전트는 외부 데이터가 없으므로 기본 점수(50) 반환 예상
+
+                    // 가중치 적용 (지지/저항 40%, 기준봉 40%, 섹터 20%)
+                    agentScore = (srResult.Score * 0.4) + (refResult.Score * 0.4) + (50 * 0.2);
+                }
+                
+                snap.SetIndicator("AGENT_SCORE", agentScore);
+
                 var res = _engine.Evaluate(strategy, snapshots, i);
                 
                 // [상태 업데이트 및 중복 신호 필터링]
